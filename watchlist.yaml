@@ -1,0 +1,42 @@
+# What to watch, and when to shout about it.
+#
+# Add an item by hand, or run:
+#   pricetracker add <url> --name "Thing" --target 850000
+#
+# After adding a shop, check the price can actually be read:
+#   pricetracker test-url <url>
+
+defaults:
+  currency: HUF          # assumed for any item that doesn't say otherwise
+  cooldown_days: 3       # after alerting, stay quiet this long unless it drops further
+  drop_alert_pct: 10     # also alert on a drop this far below the recent median
+  alert_on_out_of_stock: false
+
+items:
+  # ---------------------------------------------------------------------
+  # Example: one item, watched at two shops, alerting on whichever is cheaper.
+  # Replace this with what you actually want to buy.
+  # ---------------------------------------------------------------------
+  - name: Sony Alpha A7 IV váz
+    target_price: 900000
+    currency: HUF
+    sources:
+      - url: https://www.alza.hu/sony-alpha-a7-iv-vaz-d6799672.htm
+
+  - name: Sony a7 IV body
+    target_price: 1800
+    currency: USD
+    sources:
+      - url: https://www.bhphotovideo.com/c/product/1667800-REG/sony_ilce_7m4_b_alpha_a7_iv_mirrorless.html
+
+  # ---------------------------------------------------------------------
+  # A shop that doesn't publish price metadata needs a CSS selector.
+  # Find it with `pricetracker test-url <url>`, then uncomment:
+  # ---------------------------------------------------------------------
+  # - name: Peak Design Travel Tripod
+  #   target_price: 199000
+  #   sources:
+  #     - url: https://example.hu/travel-tripod
+  #       selector: .product-price .final
+  #
+  # Set `enabled: false` on an item to park it without deleting it.

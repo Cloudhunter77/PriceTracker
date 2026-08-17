@@ -1,0 +1,33 @@
+[project]
+name = "pricetracker"
+version = "0.1.0"
+description = "Track prices of shopping-list items across shops and alert when they drop"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "extruct>=0.18",
+    "price-parser>=0.5",
+    "parsel>=1.9",
+    "pydantic>=2.7",
+    "ruamel.yaml>=0.18",
+    "typer>=0.12",
+]
+
+[project.scripts]
+pricetracker = "pricetracker.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pricetracker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

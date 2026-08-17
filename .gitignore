@@ -1,0 +1,11 @@
+# Pages saved for debugging a failed parse — noisy, and can be large.
+data/debug/
+
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.env
