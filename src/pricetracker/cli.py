@@ -20,9 +20,13 @@ from .config import (
 from .extract import METHODS, extract_all
 from .fetch import Fetcher, FetchError
 from .format import format_price
-from .notify import EmailError, send_alert_email
+from .notify import EmailError, send_digest
 from .runner import run_check
 from .store import HISTORY_FILE, STATE_FILE, Store
+from .events.config import DEFAULT_EVENTS_CONFIG, load_events_config
+from .events.runner import check_events
+from .events.store import EventStore
+from .format import format_distance, format_event_when
 
 app = typer.Typer(
     add_completion=False,
@@ -57,6 +61,24 @@ def _load(path: Path):
     except ValueError as exc:  # pydantic validation
         console.print(f"[red]{path} is not valid:[/red]\n{exc}")
         raise typer.Exit(code=2)
+
+
+def _deliver(alerts, events, failures, *, dry_run: bool, no_email: bool) -> None:
+    """Send the digest, or explain why it wasn't sent."""
+    if not alerts and not events:
+        return
+    if dry_run:
+        console.print("[dim](dry run — no email sent, nothing recorded)[/dim]")
+        return
+    if no_email:
+        console.print("[dim](--no-email — recorded, but nothing sent)[/dim]")
+        return
+    try:
+        if send_digest(alerts, events, failures):
+            console.print("[green]Digest email sent.[/green]")
+    except EmailError as exc:
+        console.print(f"[red]Email not sent: {exc}[/red]")
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -113,18 +135,10 @@ def check(
     else:
         console.print("\nNo alerts — nothing crossed its threshold.")
 
-    if outcome.alerts and not dry_run and not no_email:
-        try:
-            send_alert_email(outcome.alerts, outcome.failures)
-            console.print("[green]Alert email sent.[/green]")
-        except EmailError as exc:
-            console.print(f"[red]Email not sent: {exc}[/red]")
-            raise typer.Exit(code=1)
-    elif outcome.alerts and dry_run:
-        console.print("[dim](dry run — no email sent, nothing recorded)[/dim]")
-
     if outcome.failures:
         console.print(f"\n[yellow]{len(outcome.failures)} source(s) could not be read.[/yellow]")
+
+    _deliver(outcome.alerts, [], outcome.failures, dry_run=dry_run, no_email=no_email)
 
 
 @app.command("add")
@@ -298,6 +312,195 @@ def where() -> None:
     for label, path in (("watchlist", DEFAULT_WATCHLIST), ("history", HISTORY_FILE), ("alert state", STATE_FILE)):
         mark = "" if path.exists() else " [dim](not created yet)[/dim]"
         console.print(f"{label:>12}: {path.resolve()}{mark}")
+
+
+# ---- events ------------------------------------------------------------
+
+events_app = typer.Typer(add_completion=False, help="Find interesting events happening nearby.")
+app.add_typer(events_app, name="events")
+
+EventsOption = typer.Option(DEFAULT_EVENTS_CONFIG, "--config", "-c", help="Path to events.yaml")
+
+
+def _load_events(path: Path):
+    try:
+        return load_events_config(path)
+    except ConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2)
+    except ValueError as exc:
+        console.print(f"[red]{path} is not valid:[/red]\n{exc}")
+        raise typer.Exit(code=2)
+
+
+def _events_table(events, title: str = "Events") -> Table:
+    table = Table(title=title, header_style="bold")
+    table.add_column("When")
+    table.add_column("Event")
+    table.add_column("Where")
+    table.add_column("Price", justify="right")
+    table.add_column("Matches")
+    for event in events:
+        table.add_row(
+            format_event_when(event.starts_at, event.ends_at),
+            _shorten(event.title, 46),
+            _shorten(" ".join(filter(None, [event.venue, format_distance(event.distance_km)])), 30),
+            format_price(event.price, event.currency) if event.price is not None else "",
+            ", ".join(event.interests),
+        )
+    return table
+
+
+@events_app.command("check")
+def events_check(
+    config_path: Path = EventsOption,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Find events but record nothing"),
+    no_email: bool = typer.Option(False, "--no-email", help="Record events but skip the email"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Scan every source for events matching your interests."""
+    _setup_logging(verbose)
+    config = _load_events(config_path)
+    store = EventStore()
+
+    outcome = check_events(config, store, dry_run=dry_run)
+
+    console.print(
+        f"Scanned {outcome.scanned} event(s) from {len(config.active_sources)} source(s); "
+        f"{len(outcome.matched)} match your interests, {len(outcome.new)} are new."
+    )
+    if outcome.matched:
+        console.print(_events_table(outcome.matched[: config.max_per_email], "Coming up nearby"))
+    if outcome.failures:
+        console.print()
+        for failure in outcome.failures:
+            console.print(f"[red]{failure.name}[/red]: {failure.error}")
+
+    _deliver([], outcome.new, [], dry_run=dry_run, no_email=no_email)
+
+
+@events_app.command("list")
+def events_list(limit: int = typer.Option(40, "--limit", "-l")) -> None:
+    """Show upcoming events already found."""
+    upcoming = EventStore().upcoming()
+    if not upcoming:
+        console.print("Nothing recorded yet. Run [bold]pricetracker events check[/bold].")
+        return
+    console.print(_events_table(upcoming[:limit], "Upcoming"))
+
+
+@events_app.command("test-source")
+def events_test_source(
+    url: str = typer.Argument(..., help="Listing page or .ics feed to probe"),
+    kind: str = typer.Option("schemaorg", "--type", "-t", help="schemaorg or ics"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Probe one source and show the events it yields.
+
+    Use this before adding a source: it tells you whether a site publishes
+    event data we can actually read.
+    """
+    _setup_logging(verbose)
+    from .events.sources import SOURCE_TYPES, SourceError
+
+    if kind not in SOURCE_TYPES:
+        console.print(f"[red]Unknown type {kind!r}. Known: {', '.join(sorted(SOURCE_TYPES))}[/red]")
+        raise typer.Exit(code=2)
+
+    source = SOURCE_TYPES[kind](name="test", url=url)
+    with Fetcher(user_agent=_load_user_agent()) as fetcher:
+        try:
+            events = source.fetch(fetcher)
+        except SourceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
+
+    if not events:
+        console.print(
+            f"[yellow]No events found via {kind}.[/yellow]\n"
+            "The page may render its listings with JavaScript, or publish no structured "
+            "data. Try [bold]--type ics[/bold] if the site offers a calendar feed, or look "
+            "for a different listing page."
+        )
+        raise typer.Exit(code=1)
+
+    console.print(f"[green]Found {len(events)} event(s) via {kind}.[/green]")
+    console.print(_events_table(events[:20], url))
+    located = sum(1 for e in events if e.lat is not None)
+    console.print(f"{located}/{len(events)} include coordinates; the rest are geocoded by address.")
+
+
+# ---- the combined daily run --------------------------------------------
+
+
+@app.command()
+def daily(
+    watchlist: Path = WatchlistOption,
+    config_path: Path = EventsOption,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Check everything, change nothing"),
+    no_email: bool = typer.Option(False, "--no-email", help="Record, but send no email"),
+    skip_events: bool = typer.Option(False, "--skip-events", help="Prices only"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Check prices and events, then send one combined email.
+
+    This is what the daily workflow runs.
+    """
+    _setup_logging(verbose)
+    price_config = _load(watchlist)
+    outcome = run_check(price_config, Store(), dry_run=dry_run)
+    console.print(
+        f"Checked {len(outcome.readings)} source(s): {len(outcome.successes)} ok, "
+        f"{len(outcome.failures)} failed, {len(outcome.alerts)} alert(s)."
+    )
+    for alert in outcome.alerts:
+        console.print(
+            f"[bold green]ALERT[/bold green] {alert.item.name}: "
+            f"{format_price(alert.best.price, alert.item.currency)} at {alert.best.shop}"
+        )
+
+    new_events = []
+    if not skip_events:
+        # Events are optional: no config just means the feature isn't set up yet,
+        # which must not stop price alerts going out.
+        if not config_path.exists():
+            console.print(f"[dim]No {config_path} — skipping events.[/dim]")
+        else:
+            events_config = _load_events(config_path)
+            event_outcome = check_events(events_config, EventStore(), dry_run=dry_run)
+            new_events = event_outcome.new[: events_config.max_per_email]
+            console.print(
+                f"Scanned {event_outcome.scanned} event(s); {len(event_outcome.matched)} match, "
+                f"{len(event_outcome.new)} new."
+            )
+            for failure in event_outcome.failures:
+                console.print(f"[red]{failure.name}[/red]: {failure.error}")
+
+    _deliver(outcome.alerts, new_events, outcome.failures, dry_run=dry_run, no_email=no_email)
+
+
+# ---- the web UI ---------------------------------------------------------
+
+
+@app.command()
+def ui(
+    port: int = typer.Option(8420, "--port", "-p"),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open a browser window"),
+    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes"),
+) -> None:
+    """Start the web UI so you can manage everything in a browser."""
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    url = f"http://{host}:{port}"
+    console.print(f"[bold green]Price Tracker[/bold green] running at [bold]{url}[/bold]")
+    console.print("Press Ctrl+C to stop.")
+    if open_browser:
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run("pricetracker.web.app:app", host=host, port=port, reload=reload, log_level="warning")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -205,9 +206,7 @@ def append_item(
             existing.setdefault("sources", []).append(source)
             break
     else:
-        # ruamel has no representer for Decimal, so store a plain number.
-        price = int(target_price) if target_price == target_price.to_integral_value() else float(target_price)
-        item: dict[str, object] = {"name": name, "target_price": price}
+        item: dict[str, object] = {"name": name, "target_price": to_yaml_number(target_price)}
         if currency:
             item["currency"] = currency.upper()
         item["sources"] = [source]
@@ -217,3 +216,40 @@ def append_item(
     Watchlist.model_validate(raw)
     with path.open("w", encoding="utf-8") as fh:
         yaml.dump(raw, fh)
+
+
+@contextmanager
+def edit_watchlist(path: Path = DEFAULT_WATCHLIST):
+    """Edit watchlist.yaml as a plain mapping, safely.
+
+    Yields the round-trip mapping so comments and formatting survive. The result
+    is validated before anything is written, so a bad edit leaves the working
+    file untouched rather than corrupting it.
+    """
+    raw = {}
+    if path.exists():
+        with path.open(encoding="utf-8") as fh:
+            raw = _yaml().load(fh) or {}
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{path} must contain a YAML mapping at the top level.")
+    raw.setdefault("items", [])
+
+    yield raw
+
+    Watchlist.model_validate(raw)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        _yaml().dump(raw, fh)
+
+
+def find_raw_item(raw: dict, name: str) -> dict | None:
+    """The mapping for one item inside a round-trip watchlist."""
+    for item in raw.get("items", []):
+        if str(item.get("name", "")).casefold() == name.casefold():
+            return item
+    return None
+
+
+def to_yaml_number(value: Decimal) -> int | float:
+    """ruamel has no Decimal representer, so store a plain number."""
+    return int(value) if value == value.to_integral_value() else float(value)

@@ -1,0 +1,35 @@
+{% if error %}
+  <div class="job"><strong>{{ error }}</strong></div>
+{% else %}
+  <div class="job">
+    {% if winner %}
+      <strong>Readable via {{ winner }}</strong> — found
+      {{ found[winner].price }} {{ found[winner].currency or '' }}.
+      {% if winner == 'selector' %}
+        Keep the selector: no metadata method worked for this shop.
+      {% else %}
+        No selector needed.
+      {% endif %}
+    {% else %}
+      <strong>No price found.</strong>
+      This page probably renders its price with JavaScript, or blocked the request.
+      Open it in a browser, right-click the price → Inspect, and paste a CSS selector above.
+    {% endif %}
+    <table style="margin-top:10px">
+      <thead><tr><th>Method</th><th class="num">Price</th><th>Currency</th><th>Stock</th></tr></thead>
+      <tbody>
+        {% for method in methods %}
+          <tr>
+            <td>{% if method in found %}<span class="tag ok">{{ method }}</span>
+                {% else %}<span class="muted">{{ method }}</span>{% endif %}</td>
+            <td class="num">{{ found[method].price if method in found else '' }}</td>
+            <td>{{ found[method].currency or '?' if method in found else '' }}</td>
+            <td>{% if method in found %}
+                  {{ {true:'yes', false:'no', none:'?'}[found[method].in_stock] }}
+                {% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

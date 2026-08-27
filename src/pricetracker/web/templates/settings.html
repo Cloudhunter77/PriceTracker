@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% set page = 'settings' %}
+{% block title %}Settings · Price Tracker{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p class="sub">Defaults for every item that doesn't override them.</p>
+
+<form method="post" action="/settings" class="card">
+  <div class="grid3">
+    <div class="field"><label for="currency">Default currency</label>
+      <input id="currency" name="currency" value="{{ defaults.currency }}" required></div>
+    <div class="field"><label for="cooldown_days">Quiet for (days)</label>
+      <input id="cooldown_days" name="cooldown_days" value="{{ defaults.cooldown_days }}" required></div>
+    <div class="field"><label for="drop_alert_pct">Alert on a drop of (%)</label>
+      <input id="drop_alert_pct" name="drop_alert_pct" value="{{ defaults.drop_alert_pct }}" required></div>
+  </div>
+  <div class="check" style="margin-bottom:14px">
+    <input type="checkbox" id="oos" name="alert_on_out_of_stock" {{ 'checked' if defaults.alert_on_out_of_stock }}>
+    <label for="oos" style="margin:0;font-weight:400">Alert even when an item is out of stock</label>
+  </div>
+  <button class="btn" type="submit">Save</button>
+</form>
+
+<h2>Email</h2>
+<div class="card">
+  {% if email_ready %}
+    <p><span class="tag ok">configured</span> Alerts go to <strong>{{ email_user }}</strong>.</p>
+  {% else %}
+    <p><span class="tag bad">not configured</span> No alert emails will be sent from this machine.</p>
+    <p class="muted">Set <code>GMAIL_USER</code> and <code>GMAIL_APP_PASSWORD</code> in your
+      environment to send locally. For the daily run, add them as repository secrets on GitHub —
+      the README has the steps.</p>
+  {% endif %}
+</div>
+
+<h2>Files</h2>
+<div class="card">
+  <table>
+    <tbody>
+      <tr><td>Watchlist</td><td class="muted">{{ watchlist_path }}</td></tr>
+      <tr><td>Events</td><td class="muted">{{ events_path }}</td></tr>
+    </tbody>
+  </table>
+  {% if git.is_repo %}
+    <p class="muted" style="margin-bottom:0">
+      {% if git.needs_push %}
+        {{ git.dirty_files|length }} uncommitted change(s){% if git.ahead %}, {{ git.ahead }} unpushed commit(s){% endif %}.
+        Push them so the daily run picks them up.
+      {% else %}
+        Everything is committed and pushed — the daily run is using these settings.
+      {% endif %}
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

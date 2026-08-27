@@ -1,0 +1,67 @@
+# What counts as an interesting event, and where to look for it.
+#
+# Add or test a source in the web UI (pricetracker ui), or from the terminal:
+#   pricetracker events test-source https://example.hu/programok
+#
+# IMPORTANT: the sources below are a starting point, NOT verified working.
+# Whether a site can be read depends on it publishing schema.org Event data.
+# Run test-source on each one, delete the ones that come back empty, and look
+# for a calendar (.ics) feed instead — those are the most reliable of all.
+
+home:
+  label: Budapest
+  lat: 47.4979
+  lon: 19.0402
+  radius_km: 15
+
+window_days: 30       # how far ahead to look
+geocode: true         # resolve venue addresses to coordinates via OpenStreetMap
+max_per_email: 25     # cap on events in a single digest
+
+interests:
+  - name: Live music
+    keywords:
+      [koncert, concert, gig, live, élő, dj, zenekar, band, jazz, techno, fesztivál, festival]
+
+  - name: Tech
+    keywords:
+      [meetup, hackathon, developer, fejlesztő, python, javascript, konferencia,
+       conference, workshop, startup, AI]
+
+  - name: Food & markets
+    keywords:
+      [piac, market, street food, vásár, gasztro, food, bor, wine, sör, craft beer, pop-up]
+
+  - name: Culture
+    keywords:
+      [színház, theatre, theater, kiállítás, exhibition, premier, vetítés, screening,
+       film, mozi, tárlat, galéria, gallery, múzeum, museum]
+
+sources:
+  # --- general Budapest listings (verify each with test-source) ---
+  - name: port.hu
+    type: schemaorg
+    url: https://port.hu/programok/budapest
+
+  - name: We Love Budapest
+    type: schemaorg
+    url: https://welovebudapest.com/programok/
+
+  - name: Funzine
+    type: schemaorg
+    url: https://funzine.hu/events/
+
+  # --- venues often publish cleaner data than aggregators ---
+  - name: A38
+    type: schemaorg
+    url: https://www.a38.hu/hu/programok
+
+  - name: Akvárium Klub
+    type: schemaorg
+    url: https://akvariumklub.hu/programok/
+    enabled: false
+
+  # --- a calendar feed, if a venue offers one, looks like this ---
+  # - name: Trafó
+  #   type: ics
+  #   url: https://example.hu/events.ics

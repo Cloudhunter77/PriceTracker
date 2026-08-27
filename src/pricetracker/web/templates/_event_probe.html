@@ -1,0 +1,25 @@
+{% if error %}
+  <div class="job"><strong>Could not read this source.</strong><div>{{ error }}</div></div>
+{% elif not events %}
+  <div class="job">
+    <strong>No events found via {{ kind }}.</strong>
+    <div>The page probably builds its listings with JavaScript, or publishes no structured data.
+      If the site offers a calendar (.ics) feed, try that instead — those are the most reliable.</div>
+  </div>
+{% else %}
+  <div class="job">
+    <strong>Found {{ total }} event{{ '' if total == 1 else 's' }} via {{ kind }}.</strong>
+    <table style="margin-top:10px">
+      <thead><tr><th>When</th><th>Event</th><th>Where</th></tr></thead>
+      <tbody>
+        {% for event in events %}
+          <tr>
+            <td style="white-space:nowrap">{{ event.starts_at|when(event.ends_at) }}</td>
+            <td>{{ event.title }}</td>
+            <td class="muted">{{ event.venue or '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

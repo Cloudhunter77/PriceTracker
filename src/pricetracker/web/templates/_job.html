@@ -1,0 +1,5 @@
+<div class="job" {% if not job.done %}data-poll="{{ job.id }}"{% endif %}>
+  <strong>{{ job.label }}{% if not job.done %} …{% endif %}</strong>
+  <div>{{ job.message }}</div>
+  {% if job.lines %}<pre>{{ job.lines|join('\n') }}</pre>{% endif %}
+</div>

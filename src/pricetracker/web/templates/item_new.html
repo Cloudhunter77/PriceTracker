@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Add item · Price Tracker{% endblock %}
+{% block content %}
+<h1>Add an item</h1>
+<p class="sub">Paste a product URL and test it — you'll see straight away whether the price can be read.</p>
+
+<form method="post" action="/items" id="addform" class="card">
+  <div class="field">
+    <label for="url">Product URL</label>
+    <input id="url" name="url" placeholder="https://www.alza.hu/..." required>
+  </div>
+
+  <div class="row" style="margin-bottom:8px">
+    <button class="btn ghost" type="button" onclick="probe()">Test this URL</button>
+    <span class="muted" style="font-size:13px">Optional, but it saves a surprise tomorrow.</span>
+  </div>
+  <div id="probe"></div>
+
+  <div class="field" style="margin-top:14px">
+    <label for="selector">CSS selector <span class="muted">— only if the test finds nothing</span></label>
+    <input id="selector" name="selector" placeholder=".product-price .final">
+  </div>
+
+  <div class="grid3">
+    <div class="field">
+      <label for="name">Name</label>
+      <input id="name" name="name" placeholder="Sony A7 IV" required>
+    </div>
+    <div class="field">
+      <label for="target">Alert below</label>
+      <input id="target" name="target" placeholder="900000" required>
+    </div>
+    <div class="field">
+      <label for="currency">Currency</label>
+      <select id="currency" name="currency">
+        {% for code in currencies %}
+          <option value="{{ code }}" {{ 'selected' if code == default_currency }}>{{ code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <p class="muted" style="font-size:13px;margin:0 0 14px">
+    Reuse an existing name to add a second shop for the same thing — the cheaper one wins.
+  </p>
+  <button class="btn" type="submit">Add to watchlist</button>
+  <a class="btn ghost" href="/">Cancel</a>
+</form>
+
+<script>
+  async function probe() {
+    const form = document.getElementById('addform');
+    const target = document.getElementById('probe');
+    if (!form.url.value.trim()) { form.url.focus(); return; }
+    target.innerHTML = '<div class="job">Fetching the page&hellip;</div>';
+    const data = new FormData();
+    data.append('url', form.url.value);
+    data.append('selector', form.selector.value);
+    try {
+      const response = await fetch('/items/test', { method: 'POST', body: data });
+      target.innerHTML = await response.text();
+    } catch (err) {
+      target.innerHTML = '<div class="job">Request failed: ' + err + '</div>';
+    }
+  }
+</script>
+{% endblock %}

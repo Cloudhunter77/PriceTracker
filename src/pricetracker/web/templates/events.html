@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% set page = 'events' %}
+{% block title %}Events · Price Tracker{% endblock %}
+{% block content %}
+{% if not config %}
+  <h1>Events</h1>
+  <div class="card empty">
+    <p>No valid <code>events.yaml</code> found.</p>
+    <p class="muted">Create one in the project root — the README has a template.</p>
+  </div>
+{% else %}
+<div class="spread">
+  <div>
+    <h1>{{ events|length }} event{{ '' if events|length == 1 else 's' }} coming up</h1>
+    <p class="sub">
+      Within {{ config.home.radius_km|round|int }} km of {{ config.home.label or 'home' }},
+      over the next {{ config.window_days }} days.
+    </p>
+  </div>
+  <form method="post" action="/events/check" data-into="job" data-busy="Scanning sources&hellip;">
+    <button class="btn ghost" type="submit">Find events now</button>
+  </form>
+</div>
+<div id="job"></div>
+
+{% if by_interest %}
+  <div class="legend" style="margin:16px 0">
+    {% for name, count in by_interest.items() %}
+      <span class="tag">{{ name }} · {{ count }}</span>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if events %}
+  <div class="card scroll" style="margin-top:16px">
+    <table>
+      <thead><tr><th>When</th><th>Event</th><th>Where</th><th class="num">From</th><th>Matches</th></tr></thead>
+      <tbody>
+        {% for event in events %}
+          <tr>
+            <td style="white-space:nowrap">{{ event.starts_at|when(event.ends_at) }}</td>
+            <td>{% if event.url %}<a href="{{ event.url }}">{{ event.title }}</a>
+                {% else %}{{ event.title }}{% endif %}
+                <div class="muted" style="font-size:12px">{{ event.source }}</div></td>
+            <td class="muted">{{ event.venue or '—' }}
+              {%- if event.distance_km is not none %}<div style="font-size:12px">{{ event.distance_km|distance }}</div>{% endif %}</td>
+            <td class="num">{% if event.price is not none %}{{ event.price|money(event.currency) }}{% endif %}</td>
+            <td>{% for i in event.interests %}<span class="tag">{{ i }}</span> {% endfor %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="card empty" style="margin-top:16px">
+    <p>No events found yet.</p>
+    <p class="muted">Run a scan, or test whether your sources publish readable event data.</p>
+  </div>
+{% endif %}
+
+<h2>Sources</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>URL</th><th></th></tr></thead>
+    <tbody>
+      {% for source in config.sources %}
+        <tr>
+          <td>{{ source.name }}{% if not source.enabled %} <span class="tag">off</span>{% endif %}</td>
+          <td class="muted">{{ source.type }}</td>
+          <td class="muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis">
+            <a href="{{ source.url }}">{{ source.url }}</a></td>
+          <td class="num">
+            <form method="post" action="/events/sources/remove" style="display:inline">
+              <input type="hidden" name="name" value="{{ source.name }}">
+              <button class="btn danger small" type="submit">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <form method="post" action="/events/sources" id="srcform" style="margin-top:16px">
+    <div class="grid3">
+      <div class="field"><label for="sname">Name</label>
+        <input id="sname" name="name" placeholder="port.hu" required></div>
+      <div class="field"><label for="skind">Type</label>
+        <select id="skind" name="kind">
+          <option value="schemaorg">Web page (schema.org)</option>
+          <option value="ics">Calendar feed (.ics)</option>
+        </select></div>
+      <div class="field"><label for="surl">URL</label>
+        <input id="surl" name="url" placeholder="https://..." required></div>
+    </div>
+    <div class="row">
+      <button class="btn ghost" type="button" onclick="probeSource()">Test this source</button>
+      <button class="btn" type="submit">Add source</button>
+    </div>
+  </form>
+  <div id="srcprobe"></div>
+</div>
+
+<h2>Where and when</h2>
+<form method="post" action="/events/settings" class="card">
+  <div class="grid2">
+    <div class="field"><label for="lat">Latitude</label>
+      <input id="lat" name="lat" value="{{ config.home.lat }}" required></div>
+    <div class="field"><label for="lon">Longitude</label>
+      <input id="lon" name="lon" value="{{ config.home.lon }}" required></div>
+  </div>
+  <div class="grid2">
+    <div class="field"><label for="radius_km">Radius (km)</label>
+      <input id="radius_km" name="radius_km" value="{{ config.home.radius_km }}" required></div>
+    <div class="field"><label for="window_days">Look ahead (days)</label>
+      <input id="window_days" name="window_days" value="{{ config.window_days }}" required></div>
+  </div>
+  <button class="btn" type="submit">Save</button>
+</form>
+
+<script>
+  async function probeSource() {
+    const form = document.getElementById('srcform');
+    const target = document.getElementById('srcprobe');
+    if (!form.url.value.trim()) { form.url.focus(); return; }
+    target.innerHTML = '<div class="job">Reading the source&hellip;</div>';
+    const data = new FormData();
+    data.append('url', form.url.value);
+    data.append('kind', form.kind.value);
+    try {
+      const response = await fetch('/events/sources/test', { method: 'POST', body: data });
+      target.innerHTML = await response.text();
+    } catch (err) {
+      target.innerHTML = '<div class="job">Request failed: ' + err + '</div>';
+    }
+  }
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="hu">
+<head>
+  <title>Budapest programok</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      { "@type": "WebSite", "name": "Programok" },
+      {
+        "@type": "MusicEvent",
+        "name": "Éjszakai Koncert a Dunán",
+        "startDate": "2026-09-04T20:00:00+02:00",
+        "endDate": "2026-09-04T23:30:00+02:00",
+        "url": "https://example.hu/koncert",
+        "description": "Élő zenekar a hajón",
+        "location": {
+          "@type": "Place",
+          "name": "A38 Hajó",
+          "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "Petőfi híd budai hídfő",
+            "addressLocality": "Budapest",
+            "postalCode": "1117"
+          },
+          "geo": { "@type": "GeoCoordinates", "latitude": 47.4757, "longitude": 19.0603 }
+        },
+        "offers": [
+          { "@type": "Offer", "price": "6900", "priceCurrency": "HUF" },
+          { "@type": "Offer", "price": "4500", "priceCurrency": "HUF" }
+        ]
+      },
+      {
+        "@type": "TheaterEvent",
+        "name": "Színház: Bánk bán",
+        "startDate": "2026-09-10T19:00:00+02:00",
+        "location": { "@type": "Place", "name": "Nemzeti Színház",
+                      "address": "Bajor Gizi park 1, Budapest" }
+      },
+      {
+        "@type": "Event",
+        "name": "Online webinar",
+        "startDate": "2026-09-05T18:00:00+02:00",
+        "eventAttendanceMode": "https://schema.org/OnlineEventAttendanceMode",
+        "location": { "@type": "VirtualLocation", "url": "https://zoom.example" }
+      },
+      {
+        "@type": "MusicEvent",
+        "name": "Elmaradt buli",
+        "startDate": "2026-09-06T21:00:00+02:00",
+        "eventStatus": "https://schema.org/EventCancelled",
+        "location": { "@type": "Place", "name": "Akvárium" }
+      },
+      {
+        "@type": "Event",
+        "startDate": "2026-09-07T10:00:00+02:00",
+        "location": { "@type": "Place", "name": "Nowhere" }
+      }
+    ]
+  }
+  </script>
+</head>
+<body><h1>Programok</h1></body>
+</html>

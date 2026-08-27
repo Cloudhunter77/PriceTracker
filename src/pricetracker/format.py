@@ -27,3 +27,23 @@ def format_price(amount: Decimal | None, currency: str | None) -> str:
     if code in _PREFIX:
         return f"{_PREFIX[code]}{number}"
     return f"{number} {code}".strip()
+
+
+def format_event_when(starts_at, ends_at=None) -> str:
+    """Render an event's time as 'Fri 4 Sep, 20:00', or a range across days."""
+    day = starts_at.strftime("%a %-d %b")
+    time = starts_at.strftime("%H:%M")
+    # Midnight almost always means "date only", not an event starting at 00:00.
+    start = day if time == "00:00" else f"{day}, {time}"
+    if ends_at is None or ends_at.date() == starts_at.date():
+        return start
+    return f"{start} – {ends_at.strftime('%a %-d %b')}"
+
+
+def format_distance(km: float | None) -> str:
+    """Distance from home, or an honest blank when the venue wasn't resolvable."""
+    if km is None:
+        return ""
+    if km < 1:
+        return f"{km * 1000:.0f} m away"
+    return f"{km:.1f} km away"

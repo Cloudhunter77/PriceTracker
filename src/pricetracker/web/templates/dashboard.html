@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% set page = 'dashboard' %}
+{% block content %}
+<div class="spread">
+  <div>
+    <h1>Watching {{ cards|length }} item{{ '' if cards|length == 1 else 's' }}</h1>
+    <p class="sub">Prices are checked once a day. You're emailed when one hits its target.</p>
+  </div>
+  <div class="row">
+    <form method="post" action="/check" data-into="job" data-busy="Checking every shop&hellip;">
+      <button class="btn ghost" type="submit">Check now</button>
+    </form>
+    <a class="btn" href="/items/new">Add item</a>
+  </div>
+</div>
+<div id="job"></div>
+
+{% if not cards %}
+  <div class="empty card" style="margin-top:20px">
+    <p>Nothing on the watchlist yet.</p>
+    <a class="btn" href="/items/new">Add the first item</a>
+  </div>
+{% else %}
+  <div class="cards" style="margin-top:20px">
+    {% for card in cards %}
+      <div class="card">
+        <div class="spread">
+          <h3><a href="/items/{{ card.item.name|urlencode }}">{{ card.item.name }}</a></h3>
+          {% if not card.item.enabled %}<span class="tag">paused</span>{% endif %}
+        </div>
+        {% if card.best %}
+          <div class="price {{ 'hit' if card.below_target }}">
+            {{ card.best.price|money(card.item.currency) }}
+          </div>
+          <p class="muted" style="margin:2px 0 10px">
+            at {{ card.best.shop }} · target {{ card.item.target_price|money(card.item.currency) }}
+            {% if card.below_target %}<span class="tag ok">below target</span>{% endif %}
+          </p>
+          {{ card.spark|safe }}
+        {% else %}
+          <div class="price muted">—</div>
+          <p class="muted" style="margin:2px 0 10px">No price recorded yet.</p>
+        {% endif %}
+        <p class="muted" style="margin:10px 0 0;font-size:13px">
+          {{ card.shops }} shop{{ '' if card.shops == 1 else 's' }}
+          {%- if card.checked_at %} · checked {{ card.checked_at.strftime('%-d %b %H:%M') }}{% endif %}
+          {%- if card.failing %} · <span class="tag bad">{{ card.failing|length }} failing</span>{% endif %}
+        </p>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<h2>Coming up nearby</h2>
+{% if events %}
+  <div class="card scroll">
+    <table>
+      <thead><tr><th>When</th><th>Event</th><th>Where</th><th class="num">From</th></tr></thead>
+      <tbody>
+        {% for event in events %}
+          <tr>
+            <td style="white-space:nowrap">{{ event.starts_at|when(event.ends_at) }}</td>
+            <td>{% if event.url %}<a href="{{ event.url }}">{{ event.title }}</a>
+                {% else %}{{ event.title }}{% endif %}</td>
+            <td class="muted">{{ event.venue or '' }}
+              {%- if event.distance_km %} · {{ event.distance_km|distance }}{% endif %}</td>
+            <td class="num">{% if event.price is not none %}{{ event.price|money(event.currency) }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:10px"><a href="/events">All events →</a></p>
+{% elif has_events_config %}
+  <div class="card empty">
+    <p>No events found yet.</p>
+    <a class="btn ghost" href="/events">Set up event sources</a>
+  </div>
+{% else %}
+  <div class="card empty"><p>Events aren't configured yet. <a href="/events">Set them up</a>.</p></div>
+{% endif %}
+{% endblock %}

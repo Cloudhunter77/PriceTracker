@@ -8,7 +8,14 @@ import pytest
 from pricetracker.alerts import REASON_DROP, REASON_TARGET, Alert
 from pricetracker.config import Item, Source
 from pricetracker.format import format_price
-from pricetracker.notify.email import EmailConfig, EmailError, render_html, render_text, send_alert_email
+from pricetracker.notify.email import (
+    EmailConfig,
+    EmailError,
+    render_html,
+    render_text,
+    send_digest,
+    subject,
+)
 from pricetracker.store import Reading
 
 NOW = datetime(2026, 8, 17, 9, 0, tzinfo=timezone.utc)
@@ -55,7 +62,7 @@ def test_price_formatting(amount, currency, expected):
 
 
 def test_text_email_contains_the_essentials():
-    body = render_text([make_alert(previous=Decimal("1499900"))], failures=[])
+    body = render_text([make_alert(previous=Decimal("1499900"))], [], [])
     assert "Sony A7 IV" in body
     assert "1 299 900 Ft" in body
     assert "alza.hu" in body
@@ -64,14 +71,14 @@ def test_text_email_contains_the_essentials():
 
 
 def test_html_email_contains_the_essentials():
-    body = render_html([make_alert(previous=Decimal("1499900"))], failures=[])
+    body = render_html([make_alert(previous=Decimal("1499900"))], [], [])
     assert "Sony A7 IV" in body
     assert "1 299 900 Ft" in body
     assert 'href="https://alza.hu/a7"' in body
 
 
 def test_drop_alert_explains_itself():
-    body = render_text([make_alert(reason=REASON_DROP, median=Decimal("1600000"))], failures=[])
+    body = render_text([make_alert(reason=REASON_DROP, median=Decimal("1600000"))], [], [])
     assert "sharp drop" in body
     assert "1 600 000 Ft" in body
 
@@ -85,7 +92,7 @@ def test_failures_are_reported_alongside_alerts():
         status="error",
         error="HTTP 403",
     )
-    for body in (render_text([make_alert()], [failure]), render_html([make_alert()], [failure])):
+    for body in (render_text([make_alert()], [], [failure]), render_html([make_alert()], [], [failure])):
         assert "Tripod" in body
         assert "HTTP 403" in body
 
@@ -100,15 +107,15 @@ def test_untrusted_text_is_escaped_in_html():
         status="error",
         error="broke & failed",
     )
-    body = render_html([make_alert()], [failure])
+    body = render_html([make_alert()], [], [failure])
     assert "<script>alert(1)</script>" not in body
     assert "&lt;script&gt;" in body
     assert "broke &amp; failed" in body
 
 
-def test_nothing_is_sent_when_there_are_no_alerts():
+def test_nothing_is_sent_when_there_is_nothing_to_report():
     # No SMTP config present, so this would raise if it tried to send.
-    send_alert_email([], failures=[], config=None)
+    assert send_digest([], [], [], config=None) is False
 
 
 def test_missing_credentials_explain_what_to_set():
@@ -139,3 +146,80 @@ def test_config_accepts_multiple_recipients_and_overrides():
     assert config.host == "smtp.fastmail.com"
     assert config.port == 587
     assert config.use_ssl is False
+
+
+# ---- events in the digest ----------------------------------------------
+
+
+def make_event(title="Éjszakai Koncert", **kwargs):
+    from datetime import timedelta
+
+    from pricetracker.events.models import Event
+
+    defaults = dict(
+        starts_at=NOW + timedelta(days=3),
+        source="port.hu",
+        venue="A38 Hajó",
+        url="https://example.hu/koncert",
+        price=Decimal("4500"),
+        currency="HUF",
+        distance_km=2.9,
+        interests=["Live music"],
+    )
+    defaults.update(kwargs)
+    return Event(title=title, **defaults)
+
+
+def test_events_appear_in_both_renderings():
+    for body in (render_text([], [make_event()], []), render_html([], [make_event()], [])):
+        assert "Éjszakai Koncert" in body
+        assert "A38 Hajó" in body
+        assert "4 500 Ft" in body
+        assert "2.9 km away" in body
+
+
+def test_event_without_a_known_distance_says_nothing_about_it():
+    body = render_text([], [make_event(distance_km=None)], [])
+    assert "km away" not in body
+    assert "A38 Hajó" in body
+
+
+def test_digest_carries_prices_and_events_together():
+    for body in (
+        render_text([make_alert()], [make_event()], []),
+        render_html([make_alert()], [make_event()], []),
+    ):
+        assert "Sony A7 IV" in body
+        assert "Éjszakai Koncert" in body
+
+
+def test_event_titles_are_escaped_in_html():
+    body = render_html([], [make_event("<b>Koncert</b>")], [])
+    assert "<b>Koncert</b>" not in body
+    assert "&lt;b&gt;Koncert&lt;/b&gt;" in body
+
+
+@pytest.mark.parametrize(
+    "alerts,events,expected",
+    [
+        (1, 0, "Price alert: Sony A7 IV is 1 299 900 Ft"),
+        (2, 0, "Price alert: Sony A7 IV is 1 299 900 Ft (+1 more)"),
+        (1, 3, "Price alert: Sony A7 IV is 1 299 900 Ft (3 events)"),
+        (0, 1, "1 event coming up near you"),
+        (0, 4, "4 events coming up near you"),
+    ],
+)
+def test_subject_line(alerts, events, expected):
+    assert subject([make_alert()] * alerts, [make_event()] * events) == expected
+
+
+def test_a_digest_with_only_events_is_still_sent():
+    """Events alone are worth an email, even with no price drops."""
+    from pricetracker.notify.email import EmailConfig
+
+    config = EmailConfig(
+        host="localhost", port=1, username="u", password="p",
+        sender="a@b.c", recipients=["d@e.f"], use_ssl=False,
+    )
+    with pytest.raises(EmailError, match="could not send"):
+        send_digest([], [make_event()], [], config=config)

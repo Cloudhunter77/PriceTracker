@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% set page = 'dashboard' %}
+{% block title %}{{ item.name }} · Price Tracker{% endblock %}
+{% block content %}
+<p style="margin:0 0 8px"><a href="/">← All items</a></p>
+<div class="spread">
+  <div>
+    <h1>{{ item.name }}</h1>
+    <p class="sub">
+      {% if best %}Cheapest now {{ best.price|money(item.currency) }} at {{ best.shop }}{% else %}No price recorded yet{% endif %}
+      · target {{ item.target_price|money(item.currency) }}
+      {%- if lowest_ever %} · lowest ever {{ lowest_ever|money(item.currency) }}{% endif %}
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  {{ chart.svg|safe }}
+  {% if chart.series %}
+    <div class="legend" style="margin-top:6px">
+      {% for s in chart.series %}
+        <span><span class="swatch" style="background:var(--series-{{ s.slot }})"></span>{{ s.label }}</span>
+      {% endfor %}
+      <span><span class="swatch" style="background:var(--muted)"></span>target</span>
+    </div>
+  {% endif %}
+</div>
+
+<h2>Settings</h2>
+<form method="post" action="/items/{{ item.name|urlencode }}/update" class="card">
+  <div class="grid3">
+    <div class="field">
+      <label for="target">Alert below</label>
+      <input id="target" name="target" value="{{ item.target_price }}" required>
+    </div>
+    <div class="field">
+      <label for="currency">Currency</label>
+      <select id="currency" name="currency">
+        {% for code in currencies %}
+          <option value="{{ code }}" {{ 'selected' if code == item.currency }}>{{ code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="cooldown_days">Quiet for (days)</label>
+      <input id="cooldown_days" name="cooldown_days" value="{{ item.cooldown_days }}">
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="field">
+      <label for="drop_alert_pct">Also alert on a drop of (%)</label>
+      <input id="drop_alert_pct" name="drop_alert_pct" value="{{ item.drop_alert_pct }}">
+    </div>
+    <div class="field">
+      <label>Active</label>
+      <div class="check">
+        <input type="checkbox" id="enabled" name="enabled" {{ 'checked' if item.enabled }}>
+        <label for="enabled" style="margin:0;font-weight:400">Check this item daily</label>
+      </div>
+    </div>
+  </div>
+  <button class="btn" type="submit">Save</button>
+</form>
+
+<h2>Shops</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Shop</th><th>Selector</th><th></th></tr></thead>
+    <tbody>
+      {% for source in item.sources %}
+        <tr>
+          <td><a href="{{ source.url }}">{{ source.display_name }}</a></td>
+          <td class="muted">{{ source.selector or 'auto' }}</td>
+          <td class="num">
+            {% if item.sources|length > 1 %}
+              <form method="post" action="/items/{{ item.name|urlencode }}/sources/remove" style="display:inline">
+                <input type="hidden" name="url" value="{{ source.url }}">
+                <button class="btn danger small" type="submit">Remove</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="/items/{{ item.name|urlencode }}/sources" style="margin-top:14px">
+    <div class="grid2">
+      <div class="field"><label for="surl">Add another shop</label>
+        <input id="surl" name="url" placeholder="https://..." required></div>
+      <div class="field"><label for="ssel">Selector (optional)</label>
+        <input id="ssel" name="selector"></div>
+    </div>
+    <button class="btn ghost" type="submit">Add shop</button>
+  </form>
+</div>
+
+<h2>Recorded prices</h2>
+<div class="card scroll">
+  {% if readings %}
+    <table>
+      <thead><tr><th>When</th><th>Shop</th><th class="num">Price</th><th>Stock</th><th>Via</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for r in readings %}
+          <tr>
+            <td style="white-space:nowrap">{{ r.checked_at.strftime('%-d %b %H:%M') }}</td>
+            <td>{{ r.shop }}</td>
+            <td class="num">{{ r.price|money(r.currency) }}</td>
+            <td>{{ {true:'yes', false:'no', none:'?'}[r.in_stock] }}</td>
+            <td class="muted">{{ r.method or '' }}</td>
+            <td>
+              {% if r.status == 'ok' %}<span class="tag ok">ok</span>
+              {% elif r.status == 'suspect' %}<span class="tag warn" title="{{ r.error }}">unconfirmed</span>
+              {% else %}<span class="tag bad" title="{{ r.error }}">error</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">Nothing recorded yet.</p>
+  {% endif %}
+</div>
+
+<h2>Danger zone</h2>
+<form method="post" action="/items/{{ item.name|urlencode }}/delete" class="card"
+      onsubmit="return confirm('Delete {{ item.name }} and stop tracking it?')">
+  <p class="muted" style="margin-top:0">Removes the item from the watchlist. Recorded history is kept.</p>
+  <button class="btn danger" type="submit">Delete this item</button>
+</form>
+{% endblock %}
