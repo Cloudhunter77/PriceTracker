@@ -4,8 +4,11 @@ Watches the price of things you want to buy across as many shops as you like,
 keeps an eye on interesting events happening near you, and sends you one email a
 day when there's something worth knowing.
 
-It runs itself once a day on GitHub Actions — nothing to leave switched on — and
-comes with a web UI so you never have to touch a command line.
+It runs itself once a day in a container on your own server, and comes with a
+web UI so you never have to touch a command line.
+
+Deploying to TrueNAS SCALE? See [deploy/README.md](deploy/README.md) — the image
+is published to `ghcr.io/cloudhunter77/pricetracker`, so there is nothing to build.
 
 ```
 PRICE ALERTS

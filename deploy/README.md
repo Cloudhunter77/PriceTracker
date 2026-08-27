@@ -2,11 +2,16 @@
 
 The TrueNAS host is immutable — `apt` is disabled and anything written to
 `/usr/local/bin` disappears on the next system update — so this runs as a
-container, not as a host install.
+container, not as a host install. The image is built by GitHub Actions and
+pulled from GitHub Container Registry, so there is nothing to compile on the NAS.
 
 Two containers from one image: a **scheduler** that runs the check once a day,
 and the **web UI**. Both mount the same dataset, which holds your config and all
 recorded data. The image holds only code, so updating it never touches your data.
+
+> Every command below is run as `truenas_admin`, which is not root. Anything
+> touching `/mnt`, ZFS or Docker needs `sudo`. `zfs` also lives in `/usr/sbin`,
+> which is not on a non-root PATH — `sudo zfs` finds it, plain `zfs` does not.
 
 ## Why here and not GitHub Actions
 
@@ -18,50 +23,66 @@ any of this was built.
 
 ## 1. Create the dataset
 
+Find your pool name first. It is whatever is mounted under `/mnt`:
+
 ```bash
-zfs create tank/apps/pricetracker          # adjust the pool name
-chown -R 568:568 /mnt/tank/apps/pricetracker
+ls /mnt
 ```
 
-`568` is TrueNAS's `apps` user, which is what the containers run as. If the
-dataset is owned by root, the container cannot write price history and every run
-will fail.
+Then create the dataset **in the web UI**: **Datasets → select your pool → Add
+Dataset**, name it `pricetracker`.
 
-Copy `watchlist.yaml` and `events.yaml` into it:
+Use the UI rather than the command line. TrueNAS adds an ACL entry granting
+modify control to group `568` (Apps) when a dataset is created this way, and the
+containers run as that user. A dataset made with `zfs create` does not get that
+entry, and the failure shows up later as unwritable price history rather than as
+anything obviously permission-shaped.
+
+<details>
+<summary>Command-line alternative, if you prefer</summary>
 
 ```bash
-cd /mnt/tank/apps/pricetracker
-curl -sSLO https://raw.githubusercontent.com/Cloudhunter77/PriceTracker/claude/shopping-price-tracker-s3lu02/watchlist.yaml
-curl -sSLO https://raw.githubusercontent.com/Cloudhunter77/PriceTracker/claude/shopping-price-tracker-s3lu02/events.yaml
-chown 568:568 *.yaml
+sudo zfs create -p POOL/pricetracker
+sudo chown -R 568:568 /mnt/POOL/pricetracker
 ```
 
-## 2. Build the image
+Substitute your real pool name for `POOL`.
+</details>
 
-The compose file builds from source, so clone the repo somewhere on the NAS:
+## 2. Put your config in it
 
 ```bash
-git clone -b claude/shopping-price-tracker-s3lu02 \
-  https://github.com/Cloudhunter77/PriceTracker.git /mnt/tank/apps/pricetracker-src
-cd /mnt/tank/apps/pricetracker-src
-docker build -t pricetracker:latest .
+cd /mnt/POOL/pricetracker
+sudo curl -sSLO https://raw.githubusercontent.com/Cloudhunter77/PriceTracker/claude/shopping-price-tracker-s3lu02/watchlist.yaml
+sudo curl -sSLO https://raw.githubusercontent.com/Cloudhunter77/PriceTracker/claude/shopping-price-tracker-s3lu02/events.yaml
+sudo chown 568:568 *.yaml
 ```
 
 ## 3. Check it works before scheduling anything
 
 ```bash
-docker run --rm -v /mnt/tank/apps/pricetracker:/config -e TZ=Europe/Budapest \
-  pricetracker:latest pricetracker daily --dry-run
+sudo docker run --rm \
+  -v /mnt/POOL/pricetracker:/config \
+  -e TZ=Europe/Budapest \
+  ghcr.io/cloudhunter77/pricetracker:latest \
+  pricetracker daily --dry-run
 ```
 
 `--dry-run` reads real prices but records nothing and sends no email. You should
-see a price for each shop. If a shop errors, run `pricetracker test-url <url>`
-the same way to see what the page actually offers.
+see a price from each shop.
+
+If a shop errors, probe it the same way to see what the page actually offers:
+
+```bash
+sudo docker run --rm ghcr.io/cloudhunter77/pricetracker:latest \
+  pricetracker test-url "https://www.example.hu/some-product"
+```
 
 ## 4. Install as a TrueNAS app
 
-**Apps → Discover → ⋮ → Install via YAML**, and paste `docker-compose.yaml`
-from the repo with the volume path changed to your dataset.
+**Apps → Discover → ⋮ → Install via YAML**, and paste
+[`docker-compose.yaml`](../docker-compose.yaml) with `/mnt/POOL/pricetracker`
+changed to your dataset's real path.
 
 Set the email credentials as environment variables in the app's config —
 **not** inline in the YAML, which TrueNAS stores in plain text:
@@ -75,12 +96,12 @@ Set the email credentials as environment variables in the app's config —
 ## 5. Watch the first real run
 
 ```bash
-docker logs -f pricetracker-scheduler
+sudo docker logs -f pricetracker-scheduler
 ```
 
 The scheduler logs when it starts, how long until the next run, and the outcome
-of each one. To force a run immediately rather than waiting for 08:00, restart
-it with `--run-now` appended to the command.
+of each one. To make it run immediately instead of waiting for 08:00, append
+`--run-now` to its command in the app config and restart it.
 
 ## The UI and the internet
 
@@ -96,10 +117,16 @@ If you only ever use it from home, don't expose it at all.
 
 ## Updating
 
-```bash
-cd /mnt/tank/apps/pricetracker-src && git pull
-docker build -t pricetracker:latest .
-# then Restart the app in the TrueNAS UI
-```
+A new image is published on every push. To pick it up, **Restart** the app in
+the TrueNAS UI — the compose file sets `pull_policy: always`, so a restart
+fetches the current image. Your dataset is untouched.
 
-Your dataset is untouched by this.
+## When something goes wrong
+
+| Symptom | Cause |
+| --- | --- |
+| `zfs: command not found` | Not root. Use `sudo zfs`. |
+| Permission denied writing `data/` | Dataset not owned by `568`. `sudo chown -R 568:568 /mnt/POOL/pricetracker` |
+| The run happens at the wrong time | `TZ` is unset, so the container is on UTC |
+| No email, no error | Credentials missing from the app config; check `sudo docker logs pricetracker-scheduler` |
+| A shop reports 403 | That retailer blocks automated clients. Check with `test-url`, and use a shop that works — see the notes in `watchlist.yaml` |

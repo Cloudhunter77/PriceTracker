@@ -1,21 +1,29 @@
 # TrueNAS SCALE: Apps -> Discover -> three-dot menu -> Install via YAML.
 #
-# Before installing, create a dataset for the config and data, and copy
-# watchlist.yaml and events.yaml into it. Everything the tracker writes
+# Create the dataset in the TrueNAS web UI first (Datasets -> your pool ->
+# Add Dataset). The UI grants modify control to group 568 (Apps); `zfs create`
+# on the command line does not, and the container then cannot write.
+#
+# Copy watchlist.yaml and events.yaml into it. Everything the tracker writes
 # (price history, alert state, the geocode cache) stays in that dataset, so
 # updating the image never loses your data.
 #
-# Replace /mnt/tank/apps/pricetracker below with your dataset's real path.
+# Replace /mnt/POOL/pricetracker below with your dataset's real path --
+# `ls /mnt` shows your pool name.
 
 name: pricetracker
 
 x-common: &common
-  image: pricetracker:latest
-  build: .
+  # Built and published by .github/workflows/publish-image.yml, so nothing has
+  # to be compiled on the NAS. To build locally instead, comment this out and
+  # uncomment `build: .` below.
+  image: ghcr.io/cloudhunter77/pricetracker:latest
+  # build: .
+  pull_policy: always
   restart: unless-stopped
   # TrueNAS's "apps" user. The dataset must be owned by it, otherwise the
   # container cannot write price history:
-  #   chown -R 568:568 /mnt/tank/apps/pricetracker
+  #   sudo chown -R 568:568 /mnt/POOL/pricetracker
   user: "${PUID:-568}:${PGID:-568}"
   environment: &env
     # Without this the container runs in UTC and "08:00" is the wrong 08:00.
@@ -24,7 +32,7 @@ x-common: &common
     GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
     ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
   volumes:
-    - /mnt/tank/apps/pricetracker:/config
+    - /mnt/POOL/pricetracker:/config
 
 services:
   # The daily run. One process, holding the environment, logging to stdout —
