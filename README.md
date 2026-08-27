@@ -209,11 +209,45 @@ Selectors break when a shop redesigns, so prefer a metadata method when one
 works. If a source starts failing, the daily run records the error and attaches
 the unparsed page to the workflow run as an artifact.
 
+## If a shop returns 403
+
+**Read this before trusting the daily run.** The first nine days of real runs
+failed with `HTTP 403` from every shop, and the cause is where the check runs,
+not how it parses.
+
+Two things cause it, and they need different fixes:
+
+1. **A bot-shaped User-Agent.** Fixed — the default is now a normal browser UA.
+2. **GitHub Actions IP addresses.** Retailers and their bot-protection vendors
+   block datacenter IP ranges wholesale, and Actions runners sit squarely in
+   them. Nothing in this repo can talk a WAF out of that.
+
+If 403s continue after the UA change, the second cause is the one biting, and
+the fix is to run the check from your own network instead:
+
+```bash
+# Every day at 08:00, from your own machine and your own IP.
+crontab -e
+0 8 * * *  cd ~/PriceTracker && /usr/bin/env uv run pricetracker daily >> ~/pricetracker.log 2>&1
+```
+
+Set `GMAIL_USER` and `GMAIL_APP_PASSWORD` in that environment so it can still
+email you. Everything else works identically — same files, same UI, same
+behaviour. You can leave the GitHub workflow enabled as a backup or disable it
+in the **Actions** tab.
+
+Check which shops are actually working at any time:
+
+```bash
+uv run pricetracker history | tail -20
+```
+
 ## Things worth knowing
 
-**Amazon is not supported.** It blocks the datacenter IPs that GitHub Actions
-runs on, and renders prices in JavaScript. Supporting it properly needs a
-headless browser or a paid API, and would still break regularly.
+**Amazon is not supported.** It blocks datacenter IPs and renders prices in
+JavaScript. Supporting it properly needs a headless browser or a paid API, and
+would still break regularly. Note that plenty of *other* shops block Actions
+runners too — see "If a shop returns 403" above.
 
 **You won't be spammed.** Once an item alerts, it stays quiet until the price
 drops at least another 1% or `cooldown_days` pass. If the price recovers and

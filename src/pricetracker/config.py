@@ -12,9 +12,15 @@ from ruamel.yaml import YAML
 
 DEFAULT_WATCHLIST = Path("watchlist.yaml")
 
+# A real browser's User-Agent. The first version of this sent an identifying
+# "PriceTracker/0.1" string, and nine consecutive days of production runs came
+# back HTTP 403 from every shop — retail sites routinely reject any non-browser
+# UA outright. One request per product per day is not a load anyone notices;
+# looking like a bot is what got refused. Override it in watchlist.yaml under
+# `defaults.user_agent` if you'd rather identify the tool.
 DEFAULT_USER_AGENT = (
-    "PriceTracker/0.1 (personal price watcher; "
-    "+https://github.com/Cloudhunter77/PriceTracker)"
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/128.0.0.0 Safari/537.36"
 )
 
 
