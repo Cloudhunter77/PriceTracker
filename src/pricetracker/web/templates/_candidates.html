@@ -1,0 +1,58 @@
+{% if failures %}
+  <div class="job">
+    {% for shop, error in failures %}
+      <div><strong>{{ shop }}</strong>: {{ error }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if not candidates %}
+  <div class="job">
+    <strong>Nothing found for &ldquo;{{ query }}&rdquo;.</strong>
+    <div>Either these shops don't stock it, or their search pages are built with
+    JavaScript and expose no product links. Check one with
+    <code>pricetracker test-search &lt;shop&gt; "{{ query }}"</code> and fix
+    <code>shops.yaml</code> if the pattern is wrong.</div>
+    {% if unverified %}
+      <div style="padding-top:6px">Search URLs still unconfirmed for:
+        <strong>{{ unverified|join(', ') }}</strong>.</div>
+    {% endif %}
+  </div>
+{% else %}
+  <form method="post" action="/items/{{ item.name|urlencode }}/find/add">
+    <input type="hidden" name="model" value="{{ model }}">
+    <div class="job">
+      <strong>{{ candidates|length }} result(s) for &ldquo;{{ query }}&rdquo;.</strong>
+      Ticked ones look like a confident match — check the prices before saving.
+      A kit bundle costs far more than a body and shares most of its name.
+    </div>
+    <div class="scroll">
+      <table style="margin-top:10px">
+        <thead>
+          <tr><th>Track</th><th>Shop</th><th>Product</th><th class="num">Price</th>
+              <th class="num">Match</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          {% for c in candidates %}
+            <tr>
+              <td><input type="checkbox" name="url" value="{{ c.url }}"
+                         {{ 'checked' if c.suggested }} style="width:auto"></td>
+              <td>{{ c.shop }}</td>
+              <td><a href="{{ c.url }}">{{ c.title or '(no title)' }}</a></td>
+              <td class="num">
+                {%- if c.price is not none %}{{ c.price|money(c.currency) }}
+                {%- else %}<span class="muted">—</span>{% endif %}</td>
+              <td class="num">
+                {%- if c.suggested %}<span class="tag ok">{{ '%.0f'|format(c.score * 100) }}%</span>
+                {%- else %}<span class="tag">{{ '%.0f'|format(c.score * 100) }}%</span>{% endif %}</td>
+              <td class="muted" style="font-size:12px">{{ c.reason }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" type="submit">Track the ticked shops</button>
+    </div>
+  </form>
+{% endif %}

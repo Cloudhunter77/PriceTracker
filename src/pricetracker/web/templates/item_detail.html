@@ -94,6 +94,46 @@
   </form>
 </div>
 
+<h2>Find it at other shops</h2>
+<div class="card">
+  <p class="muted" style="margin-top:0">
+    Searches the shops in <code>shops.yaml</code> for the same product and lets you pick
+    which results to track. Your target price then applies to whichever shop is cheapest.
+  </p>
+  <form id="findform" onsubmit="return false">
+    <div class="grid2">
+      <div class="field">
+        <label for="model">Model / part number</label>
+        <input id="model" name="model" value="{{ item.model or '' }}" placeholder="ILCE-6700B">
+      </div>
+      <div class="field">
+        <label for="query">Search text <span class="muted">— optional</span></label>
+        <input id="query" name="query" placeholder="{{ item.name }}">
+      </div>
+    </div>
+    <button class="btn ghost" type="button" onclick="findShops()">Search other shops</button>
+    <span class="muted" style="font-size:13px">Takes a few seconds — it opens each result.</span>
+  </form>
+  <div id="found"></div>
+</div>
+
+<script>
+  async function findShops() {
+    const form = document.getElementById('findform');
+    const target = document.getElementById('found');
+    target.innerHTML = '<div class="job">Searching&hellip; opening each result to read its price.</div>';
+    const data = new FormData();
+    data.append('model', form.model.value);
+    data.append('query', form.query.value);
+    try {
+      const response = await fetch('/items/{{ item.name|urlencode }}/find', { method: 'POST', body: data });
+      target.innerHTML = await response.text();
+    } catch (err) {
+      target.innerHTML = '<div class="job">Search failed: ' + err + '</div>';
+    }
+  }
+</script>
+
 <h2>Recorded prices</h2>
 <div class="card scroll">
   {% if readings %}

@@ -35,6 +35,7 @@ from ..fetch import Fetcher, FetchError
 from ..format import format_distance, format_event_when, format_price
 from ..runner import run_check
 from ..store import Store
+from ..discover import load_shops, search_shops
 from . import charts, gitsync
 from ..config import _yaml
 
@@ -331,6 +332,75 @@ def remove_item_source(name: str, url: str = Form(...)):
     except (ConfigError, ValueError) as exc:
         return _redirect(f"/items/{name}", error=str(exc))
     return _redirect(f"/items/{name}", flash="Shop removed.")
+
+
+@app.post("/items/{name}/find", response_class=HTMLResponse)
+def find_other_shops(request: Request, name: str, model: str = Form(""), query: str = Form("")):
+    """Search other shops for this item and show what turned up.
+
+    Nothing is added here — the results are a list of checkboxes. Search for a
+    camera and you will get the body, the kit bundle and a spare battery; the
+    whole point is that you look before anything is tracked.
+    """
+    config = _watchlist()
+    item = config.find(name)
+    if item is None:
+        return HTMLResponse('<div class="job">That item no longer exists.</div>')
+
+    model = model.strip() or (item.model or "")
+    search_text = query.strip() or model or item.name
+    tracked = {s.domain for s in item.sources}
+    tracked_urls = {s.url for s in item.sources}
+
+    shops = load_shops()
+    with Fetcher(user_agent=config.defaults.user_agent) as fetcher:
+        outcome = search_shops(
+            shops, search_text, fetcher, model=model or None, title=item.name,
+            skip_domains=tracked, skip_urls=tracked_urls,
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "_candidates.html",
+        {
+            "request": request,
+            "item": item,
+            "candidates": outcome.candidates,
+            "failures": outcome.failures,
+            "model": model,
+            "query": search_text,
+            "unverified": [s.domain for s in shops if s.enabled and not s.verified and s.domain not in tracked],
+        },
+    )
+
+
+@app.post("/items/{name}/find/add")
+async def add_found_shops(request: Request, name: str):
+    """Add the shops that were ticked."""
+    form = await request.form()
+    urls = [u for u in form.getlist("url") if u.strip()]
+    model = str(form.get("model", "")).strip()
+    if not urls:
+        return _redirect(f"/items/{name}", error="Nothing was ticked.")
+
+    gitsync.pull()
+    try:
+        with edit_watchlist(DEFAULT_WATCHLIST) as raw:
+            entry = find_raw_item(raw, name)
+            if entry is None:
+                return _redirect("/", error=f"No item named {name!r}.")
+            existing = {str(s.get("url")) for s in entry.get("sources", [])}
+            added = 0
+            for url in urls:
+                if url not in existing:
+                    entry.setdefault("sources", []).append({"url": url})
+                    added += 1
+            if model and not entry.get("model"):
+                entry["model"] = model
+    except (ConfigError, ValueError) as exc:
+        return _redirect(f"/items/{name}", error=str(exc))
+
+    return _redirect(f"/items/{name}", flash=f"Added {added} shop(s).")
 
 
 @app.post("/items/{name}/delete")

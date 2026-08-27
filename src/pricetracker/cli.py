@@ -595,5 +595,155 @@ def schedule(
         log.info("run finished in %.0fs", (datetime.now() - started).total_seconds())
 
 
+# ---- finding the same product elsewhere ---------------------------------
+
+
+def _candidate_table(candidates, title: str) -> Table:
+    table = Table(title=title, header_style="bold")
+    table.add_column("#", justify="right")
+    table.add_column("Shop")
+    table.add_column("Product")
+    table.add_column("Price", justify="right")
+    table.add_column("Match")
+    table.add_column("Why")
+    for index, c in enumerate(candidates, start=1):
+        marker = "[green]✓[/green]" if c.suggested else " "
+        table.add_row(
+            f"{marker}{index}",
+            c.shop,
+            _shorten(c.title or "(no title)", 40),
+            format_price(c.price, c.currency) if c.price is not None else "—",
+            f"{c.score:.0%}",
+            _shorten(c.reason, 40),
+        )
+    return table
+
+
+@app.command()
+def find(
+    item_name: str = typer.Argument(..., help="Item on your watchlist to find elsewhere"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Part number, e.g. ILCE-6700B"),
+    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search text (defaults to the model, then the name)"),
+    add: bool = typer.Option(False, "--add", help="Add the confident matches as shops"),
+    watchlist: Path = WatchlistOption,
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Search other shops for something already on your watchlist.
+
+    Nothing is added unless you pass --add, and even then only matches
+    confident enough to be worth trusting. A kit bundle sharing a model prefix
+    with the body will show up here — that is why you look before adding.
+    """
+    _setup_logging(verbose)
+    from .discover import load_shops, search_shops
+
+    config = _load(watchlist)
+    item = config.find(item_name)
+    if item is None:
+        console.print(f"[red]No item named {item_name!r}. See `pricetracker list`.[/red]")
+        raise typer.Exit(code=2)
+
+    model = model or item.model
+    search_text = query or model or item.name
+    tracked = {s.domain for s in item.sources}
+    tracked_urls = {s.url for s in item.sources}
+
+    shops = load_shops()
+    unverified = [s.domain for s in shops if s.enabled and not s.verified and s.domain not in tracked]
+    if unverified:
+        console.print(
+            f"[dim]Search URLs unconfirmed for: {', '.join(unverified)} — "
+            f"check with `pricetracker test-search <shop> <query>`.[/dim]"
+        )
+
+    console.print(f"Searching for [bold]{search_text}[/bold] (skipping {', '.join(sorted(tracked)) or 'nothing'})…")
+    with Fetcher(user_agent=config.defaults.user_agent) as fetcher:
+        outcome = search_shops(
+            shops, search_text, fetcher, model=model, title=item.name,
+            skip_domains=tracked, skip_urls=tracked_urls,
+        )
+
+    for shop, error in outcome.failures:
+        console.print(f"[red]{shop}[/red]: {error}")
+
+    if not outcome.candidates:
+        console.print("\n[yellow]Nothing found.[/yellow] The search pages may be JavaScript-rendered — "
+                      "try `pricetracker test-search <shop> <query>` to see what one returns.")
+        raise typer.Exit(code=1)
+
+    console.print(_candidate_table(outcome.candidates, f"Other shops selling {item.name}"))
+
+    suggested = [c for c in outcome.candidates if c.suggested]
+    if not add:
+        console.print(
+            f"\n{len(suggested)} confident match(es). Add them with "
+            f"[bold]pricetracker find {item_name!r} --add[/bold], or pick individually in the web UI."
+        )
+        return
+
+    if not suggested:
+        console.print("\n[yellow]No match confident enough to add automatically.[/yellow] "
+                      "Use the web UI to pick one by hand.")
+        raise typer.Exit(code=1)
+
+    from .config import edit_watchlist, find_raw_item
+
+    with edit_watchlist(watchlist) as raw:
+        entry = find_raw_item(raw, item.name)
+        existing = {str(s.get("url")) for s in entry.get("sources", [])}
+        added = 0
+        for c in suggested:
+            if c.url not in existing:
+                entry.setdefault("sources", []).append({"url": c.url})
+                added += 1
+        if model and not entry.get("model"):
+            entry["model"] = model
+    console.print(f"[green]Added {added} shop(s) to {item.name}.[/green]")
+
+
+@app.command("test-search")
+def test_search(
+    shop_domain: str = typer.Argument(..., help="Shop domain, e.g. emag.hu"),
+    query: str = typer.Argument(..., help="What to search for"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Part number to match on"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Probe one shop's search and show what it yields.
+
+    Whether a shop can be searched depends on its results page linking to
+    products in plain HTML. This says so before you rely on it.
+    """
+    _setup_logging(verbose)
+    from .discover import load_shops, search_shop
+
+    shop = next((s for s in load_shops() if s.domain == shop_domain), None)
+    if shop is None:
+        known = ", ".join(s.domain for s in load_shops())
+        console.print(f"[red]Unknown shop {shop_domain!r}. Known: {known}[/red]")
+        raise typer.Exit(code=2)
+
+    console.print(f"Searching [bold]{shop.search_url(query)}[/bold]")
+    with Fetcher(user_agent=_load_user_agent()) as fetcher:
+        try:
+            candidates = search_shop(shop, query, fetcher, model=model, title=query)
+        except FetchError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
+
+    if not candidates:
+        console.print(
+            f"[yellow]No product links found.[/yellow]\n"
+            f"Either the search page is built with JavaScript, or {shop.product_path!r} "
+            f"is not how this shop's product URLs look. Open the search page in a browser, "
+            f"check a product link, and fix `product_path` in shops.yaml."
+        )
+        raise typer.Exit(code=1)
+
+    console.print(f"[green]Found {len(candidates)} product page(s).[/green]")
+    console.print(_candidate_table(candidates, shop.domain))
+    priced = sum(1 for c in candidates if c.price is not None)
+    console.print(f"{priced}/{len(candidates)} had a readable price.")
+
+
 if __name__ == "__main__":
     app()

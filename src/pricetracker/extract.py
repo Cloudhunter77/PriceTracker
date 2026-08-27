@@ -57,6 +57,77 @@ class ExtractionError(Exception):
 
 
 @dataclass(slots=True)
+class Product:
+    """What a page says a product *is*, not just what it costs.
+
+    Needed to tell whether two shops are selling the same thing. The model
+    number is the reliable part: titles vary wildly between shops, but
+    manufacturers' part numbers do not.
+    """
+
+    name: str | None = None
+    mpn: str | None = None
+    sku: str | None = None
+    brand: str | None = None
+    price: Decimal | None = None
+    currency: str | None = None
+    availability: str | None = None
+
+    @property
+    def model_codes(self) -> list[str]:
+        """Every string on the page that could be a model number."""
+        return [c for c in (self.mpn, self.sku) if c]
+
+
+def extract_product(html: str) -> Product | None:
+    """Read a product's identity and price from a page's structured data.
+
+    Returns None when the page carries no Product markup at all.
+    """
+    data = extruct.extract(html, syntaxes=["json-ld", "microdata"], errors="ignore")
+    nodes = list(_walk(data.get("json-ld", [])))
+    for node in _walk(data.get("microdata", [])):
+        props = node.get("properties")
+        if isinstance(props, dict):
+            nodes.append({"@type": node.get("type", ""), **props})
+
+    for node in nodes:
+        if not _has_type(node, "Product"):
+            continue
+        offer = _cheapest_offer(list(_walk(node.get("offers"))))
+        return Product(
+            name=_first_string(node.get("name")),
+            mpn=_first_string(node.get("mpn")),
+            sku=_first_string(node.get("sku")),
+            brand=_first_string(node.get("brand")),
+            price=offer.price if offer else None,
+            currency=offer.currency if offer else None,
+            availability=offer.availability if offer else None,
+        )
+    return None
+
+
+def _first_string(value: Any) -> str | None:
+    """Flatten the shapes a schema.org string value arrives in."""
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            found = _first_string(item)
+            if found:
+                return found
+        return None
+    if isinstance(value, dict):
+        for key in ("name", "@value", "value"):
+            found = _first_string(value.get(key))
+            if found:
+                return found
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
+@dataclass(slots=True)
 class Extraction:
     """A price found on a page, and how it was found."""
 

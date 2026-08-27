@@ -188,6 +188,8 @@ export GMAIL_USER=you@gmail.com GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 | `list` | Show the watchlist and the latest price of each item |
 | `history [item]` | Show recorded price history |
 | `test-url <url>` | Probe one URL and show what each price method finds |
+| `find <item>` | Search other shops for something you already track |
+| `test-search <shop> <query>` | Probe one shop's search and show what it yields |
 | `events check` | Scan event sources |
 | `events list` | Show upcoming events already found |
 | `events test-source <url>` | Probe one event source (`--type schemaorg\|ics`) |
@@ -195,6 +197,40 @@ export GMAIL_USER=you@gmail.com GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 
 Useful flags on `check` and `daily`: `--dry-run` (change nothing), `--no-email`
 (record but stay quiet), `--item "name"` (check just one thing), `--verbose`.
+
+## Finding the same product at other shops
+
+Adding a second shop by hand means going and finding its URL. `find` does the
+looking:
+
+```bash
+pricetracker find "Sony A6700 váz" --model ILCE-6700B
+```
+
+It searches the shops in [`shops.yaml`](shops.yaml), opens each result to read
+its real price, and ranks what it found. In the web UI the same thing is the
+**Find it at other shops** button on an item, with checkboxes.
+
+**Nothing is added without you ticking it**, and that is the point. Searching
+for a camera returns the body, the kit-lens bundle, a spare battery and a cage —
+and a bundle mistaken for a body is a six-figure error in HUF. Matching is on
+the manufacturer part number first (found in the URL slug, the page's `mpn`, or
+the title), falling back to title similarity; anything advertising a kit, szett,
+csomag or használt is demoted and never pre-ticked.
+
+Once confirmed, a shop is an ordinary source. Your target price applies to
+whichever shop is cheapest, so one target covers them all.
+
+Whether a shop can be searched at all depends on its results page linking to
+products in plain HTML. Check before relying on it:
+
+```bash
+pricetracker test-search emag.hu "A6700"
+```
+
+Only eMAG's pattern in `shops.yaml` is confirmed; the rest ship marked
+`verified: false`. Fix a wrong `search` or `product_path` in that file — it
+lives in your config volume, so no rebuild is needed.
 
 ## When a shop doesn't work
 

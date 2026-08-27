@@ -1,0 +1,41 @@
+# Where `pricetracker find` looks when searching for a product you already
+# track at one shop.
+#
+# VERIFICATION STATUS — only eMAG's pattern comes from a URL seen working.
+# The rest are informed guesses. Check each one before trusting it:
+#
+#   pricetracker test-search tripont.hu "A6700"
+#
+# and fix `search` or `product_path` here if it comes back empty. This file
+# lives in your config volume precisely so it can be corrected without
+# rebuilding the container image.
+#
+#   search        URL template; {query} is replaced with the search text
+#   product_path  a fragment every product URL contains, used to tell product
+#                 links apart from category and article links on the results page
+#   verified      whether someone has actually confirmed this works
+
+shops:
+  - domain: emag.hu
+    search: "https://www.emag.hu/search/{query}"
+    product_path: "/pd/"
+    verified: true          # product URL shape confirmed 2026-08-27
+
+  - domain: tripont.hu
+    search: "https://www.tripont.hu/kereses?q={query}"
+    product_path: "-p"      # e.g. ...-vaz-376751-p376751.html
+    verified: false
+
+  - domain: edigital.hu
+    search: "https://edigital.hu/search?q={query}"
+    product_path: "/termek/"
+    verified: false
+
+  - domain: ipon.hu
+    search: "https://ipon.hu/search?search={query}"
+    product_path: "/termek/"
+    verified: false
+
+  # Shops that block automated requests entirely (HTTP 403, TLS
+  # fingerprinting) — listed disabled so they don't get re-added by mistake:
+  # alza.hu, arukereso.hu, mediamarkt.hu, bhphotovideo.com

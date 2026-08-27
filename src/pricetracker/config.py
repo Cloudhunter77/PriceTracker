@@ -102,6 +102,9 @@ class Item(BaseModel):
     target_price: Decimal = Field(gt=0)
     sources: list[Source] = Field(min_length=1)
     enabled: bool = True
+    # Manufacturer part number, e.g. ILCE-6700B. Used to find the same product
+    # at other shops; shops agree on these far more than they do on titles.
+    model: str | None = None
     # None means "inherit from defaults"; resolved by Watchlist.
     currency: str | None = None
     cooldown_days: int | None = Field(default=None, ge=0)
