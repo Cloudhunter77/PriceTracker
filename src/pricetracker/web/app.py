@@ -275,6 +275,7 @@ def update_item(
     cooldown_days: str = Form(""),
     drop_alert_pct: str = Form(""),
     enabled: str = Form(""),
+    eur_target: str = Form(""),
 ):
     gitsync.pull()
     try:
@@ -289,6 +290,17 @@ def update_item(
                 entry, "drop_alert_pct", float(drop_alert_pct) if drop_alert_pct.strip() else None
             )
             entry["enabled"] = enabled == "on"
+            # A target in another currency is what opts that currency in; with
+            # none set, a shop pricing in EUR stays an error rather than being
+            # compared against the forint number.
+            targets = entry.get("targets") or {}
+            if eur_target.strip():
+                targets["EUR"] = to_yaml_number(
+                    Decimal(eur_target.replace(" ", "").replace(",", ""))
+                )
+            else:
+                targets.pop("EUR", None)
+            _set_or_clear(entry, "targets", targets or None)
     except (ConfigError, ValueError, InvalidOperation) as exc:
         return _redirect(f"/items/{name}", error=str(exc))
     return _redirect(f"/items/{name}", flash="Saved.")

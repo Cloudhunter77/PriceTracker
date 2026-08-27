@@ -134,8 +134,9 @@ def test_unparseable_page_is_recorded_and_saved_for_debugging(store):
     assert len(saved) == 1, "the page we could not parse must be kept for diagnosis"
 
 
-def test_currency_mismatch_is_an_error_not_a_bargain(store):
-    """A 2499 EUR camera must never look like a bargain against a HUF target."""
+def test_a_currency_with_no_target_is_an_error_not_a_bargain(store):
+    """A 2499 EUR camera must never look like a bargain against a HUF target.
+    Adding a EUR target is what opts that currency in."""
     fetcher = StubFetcher(
         {ALZA: html("jsonld_graph.html"), EMAG: html("jsonld_product.html")}
     )
@@ -144,7 +145,7 @@ def test_currency_mismatch_is_an_error_not_a_bargain(store):
 
     mismatch = next(r for r in outcome.readings if r.url == ALZA)
     assert mismatch.status == "error"
-    assert "currency mismatch" in mismatch.error
+    assert "no target for EUR" in mismatch.error
     assert all(a.best.url != ALZA for a in outcome.alerts)
 
 

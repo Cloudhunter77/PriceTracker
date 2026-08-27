@@ -232,6 +232,38 @@ Only eMAG's pattern in `shops.yaml` is confirmed; the rest ship marked
 `verified: false`. Fix a wrong `search` or `product_path` in that file — it
 lives in your config volume, so no rebuild is needed.
 
+## Buying in another currency
+
+A shop pricing in euros is compared against a **euro target**, not a converted
+one:
+
+```yaml
+- name: Sony A6700 váz
+  currency: HUF
+  target_price: 500000        # what a Hungarian shop has to beat
+  targets:
+    EUR: 1200                 # what a Slovak shop has to beat
+  sources:
+    - url: https://www.tripont.hu/...
+    - url: https://obchod.sk/...
+```
+
+**No exchange rate is applied anywhere.** That is deliberate: with conversion, a
+forint that weakened overnight could trip an alert on a price that never moved,
+and a real drop could be masked by the rate going the other way. Two numbers you
+control beat one number that drifts.
+
+Each currency is judged, and remembered, separately — so a forint alert never
+silences a euro one during its cooldown, and a euro drop is compared against euro
+history rather than forint history.
+
+**A currency with no target is an error, not a comparison.** If a page prices in
+EUR and the item has no EUR target, the reading is recorded as an error saying so.
+That is the rule that stops a €2 499 camera looking like a bargain against a
+forint target; setting a target is how you opt a currency in.
+
+Set the EUR target in the web UI on the item page, or in `watchlist.yaml`.
+
 ## When a shop doesn't work
 
 Run `pricetracker test-url <url>`. If every method comes up empty, the shop

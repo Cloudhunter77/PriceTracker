@@ -146,8 +146,8 @@ def check(
         for alert in outcome.alerts:
             console.print(
                 f"[bold green]ALERT[/bold green] {alert.item.name}: "
-                f"{format_price(alert.best.price, alert.item.currency)} at {alert.best.shop} "
-                f"({alert.reason})\n  {alert.best.url}"
+                f"{format_price(alert.best.price, alert.best.currency or alert.item.currency)} "
+                f"at {alert.best.shop} ({alert.reason})\n  {alert.best.url}"
             )
     else:
         console.print("\nNo alerts — nothing crossed its threshold.")
@@ -493,7 +493,8 @@ def _run_daily(
     for alert in outcome.alerts:
         console.print(
             f"[bold green]ALERT[/bold green] {alert.item.name}: "
-            f"{format_price(alert.best.price, alert.item.currency)} at {alert.best.shop}"
+            f"{format_price(alert.best.price, alert.best.currency or alert.item.currency)} "
+            f"at {alert.best.shop}"
         )
 
     new_events = []

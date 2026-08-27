@@ -105,6 +105,11 @@ class Item(BaseModel):
     # Manufacturer part number, e.g. ILCE-6700B. Used to find the same product
     # at other shops; shops agree on these far more than they do on titles.
     model: str | None = None
+    # Targets for other currencies, e.g. {"EUR": 1200}. A shop pricing in a
+    # currency listed here is compared against its own target. Deliberately not
+    # an exchange rate: converting would let a currency move, rather than a
+    # price move, decide whether you get an alert.
+    targets: dict[str, Decimal] = Field(default_factory=dict)
     # None means "inherit from defaults"; resolved by Watchlist.
     currency: str | None = None
     cooldown_days: int | None = Field(default=None, ge=0)
@@ -115,6 +120,32 @@ class Item(BaseModel):
     @classmethod
     def _upper(cls, v: str | None) -> str | None:
         return None if v is None else _validate_currency(v)
+
+    @field_validator("targets")
+    @classmethod
+    def _upper_targets(cls, v: dict[str, Decimal]) -> dict[str, Decimal]:
+        out: dict[str, Decimal] = {}
+        for code, amount in v.items():
+            if amount <= 0:
+                raise ValueError(f"target for {code} must be positive, got {amount}")
+            out[_validate_currency(code)] = amount
+        return out
+
+    def target_for(self, currency: str | None) -> Decimal | None:
+        """The target this currency is judged against, or None if untracked.
+
+        A shop pricing in a currency with no target cannot be compared to
+        anything, which is why such a reading stays an error rather than being
+        quietly measured against the wrong number.
+        """
+        if currency is None or currency == self.currency:
+            return self.target_price
+        return self.targets.get(currency.upper())
+
+    @property
+    def tracked_currencies(self) -> list[str]:
+        codes = [self.currency] if self.currency else []
+        return codes + [c for c in sorted(self.targets) if c != self.currency]
 
 
 class Watchlist(BaseModel):

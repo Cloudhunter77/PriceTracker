@@ -21,6 +21,11 @@ items:
     # Set below the best price you've seen, or you'll be alerted immediately.
     target_price: 700000
     currency: HUF
+    # To watch a shop that prices in euros, give it its own target. Prices are
+    # never converted, so a euro shop is judged against this number and a forint
+    # shop against target_price above. Without it, a EUR page is an error.
+    # targets:
+    #   EUR: 1800
     sources:
       - url: https://www.tripont.hu/tukor-nelkuli-fenykepezogepek/sony-alpha-7-iv-milc-fenykepezogep-vaz-376751-p376751.html
       - url: https://www.emag.hu/sony-alpha-7-iv-full-frame-hibrid-kamera-vaz-fekete-ilce7m4b-cec/pd/DYBBZXMBM/

@@ -95,13 +95,23 @@ def apply_suspect_guard(reading: Reading, store: Store) -> Reading:
     return reading
 
 
-def eligible_readings(item: Item, readings: list[Reading]) -> list[Reading]:
-    """Readings that may be acted on: parsed cleanly, right currency, buyable."""
+def eligible_readings(
+    item: Item, readings: list[Reading], currency: str | None = None
+) -> list[Reading]:
+    """Readings that may be acted on: parsed cleanly, priced in a currency the
+    item has a target for, and buyable.
+
+    A currency without a target is excluded rather than compared, since there
+    is no number to compare it against.
+    """
     out = []
     for reading in readings:
         if not reading.ok or reading.price is None:
             continue
-        if reading.currency is not None and reading.currency != item.currency:
+        code = reading.currency or item.currency
+        if currency is not None and code != currency:
+            continue
+        if item.target_for(code) is None:
             continue
         if reading.in_stock is False and not item.alert_on_out_of_stock:
             continue
@@ -109,12 +119,34 @@ def eligible_readings(item: Item, readings: list[Reading]) -> list[Reading]:
     return out
 
 
-def best_reading(item: Item, readings: list[Reading]) -> Reading | None:
-    """The cheapest usable price across an item's shops."""
-    usable = eligible_readings(item, readings)
+def best_reading(
+    item: Item, readings: list[Reading], currency: str | None = None
+) -> Reading | None:
+    """The cheapest usable price, within one currency.
+
+    Prices in different currencies are never compared to each other — no
+    exchange rate is applied anywhere, by design — so "cheapest" is only
+    meaningful inside a single currency.
+    """
+    usable = eligible_readings(item, readings, currency)
     if not usable:
         return None
     return min(usable, key=lambda r: r.price)  # type: ignore[arg-type,return-value]
+
+
+def currencies_present(item: Item, readings: list[Reading]) -> list[str]:
+    """Which of the item's tracked currencies actually came back priced."""
+    seen = {r.currency or item.currency for r in eligible_readings(item, readings)}
+    return [c for c in item.tracked_currencies if c in seen]
+
+
+def state_key(item: Item, currency: str) -> str:
+    """Alert state is per item *and* currency.
+
+    Keying on the item alone would let a forint alert silence a euro one for
+    the length of the cooldown, hiding a genuinely separate offer.
+    """
+    return item.name if currency == item.currency else f"{item.name} [{currency}]"
 
 
 def evaluate(
@@ -123,19 +155,43 @@ def evaluate(
     store: Store,
     state: dict[str, AlertState],
     now: datetime,
-) -> tuple[Alert | None, dict[str, AlertState]]:
-    """Decide whether this item's prices warrant an alert right now.
+) -> tuple[list[Alert], dict[str, AlertState]]:
+    """Decide which of this item's prices warrant an alert right now.
 
-    Returns the alert (or None) and the updated alert state.
+    Each currency is judged separately against its own target, so a Slovak shop
+    in euros and a Hungarian one in forints can each raise their own alert
+    without either being converted into the other.
     """
     state = dict(state)
-    best = best_reading(item, readings)
+    alerts: list[Alert] = []
+
+    for currency in currencies_present(item, readings):
+        alert, state = _evaluate_currency(item, readings, store, state, now, currency)
+        if alert is not None:
+            alerts.append(alert)
+    return alerts, state
+
+
+def _evaluate_currency(
+    item: Item,
+    readings: list[Reading],
+    store: Store,
+    state: dict[str, AlertState],
+    now: datetime,
+    currency: str,
+) -> tuple[Alert | None, dict[str, AlertState]]:
+    """The original single-currency rule, applied to one currency's readings."""
+    key = state_key(item, currency)
+    best = best_reading(item, readings, currency)
     if best is None or best.price is None:
         return None, state
 
-    target = item.target_price
-    median = store.median_best(item.name, item.currency, now=now)
-    previous = store.previous_best(item.name, item.currency)
+    target = item.target_for(currency)
+    if target is None:
+        return None, state
+
+    median = store.median_best(item.name, currency, now=now)
+    previous = store.previous_best(item.name, currency)
 
     reason: str | None = None
     if best.price <= target:
@@ -148,13 +204,13 @@ def evaluate(
     if reason is None:
         # Price is back to normal — forget that we alerted, so the next drop
         # gets through instead of being swallowed by the cooldown.
-        state.pop(item.name, None)
+        state.pop(key, None)
         return None, state
 
-    if not _should_notify(item, best.price, state.get(item.name), now):
+    if not _should_notify(item, best.price, state.get(key), now):
         return None, state
 
-    state[item.name] = AlertState(price=best.price, at=now, reason=reason)
+    state[key] = AlertState(price=best.price, at=now, reason=reason)
     return (
         Alert(item=item, best=best, reason=reason, target=target, previous=previous, median=median),
         state,

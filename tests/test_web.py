@@ -324,3 +324,28 @@ def test_many_shops_fold_into_other(tmp_path):
     chart = line_chart(rows, "HUF")
     assert len(chart.series) == 4
     assert chart.series[-1].label == "Other shops"
+
+
+def test_setting_a_eur_target_opts_that_currency_in(client, tmp_path):
+    client.post(
+        "/items/Sony A7 IV/update",
+        data={"target": "1500000", "currency": "HUF", "cooldown_days": "", "drop_alert_pct": "",
+              "enabled": "on", "eur_target": "1200"},
+    )
+    text = (tmp_path / "watchlist.yaml").read_text(encoding="utf-8")
+    assert "targets:" in text
+    assert "EUR: 1200" in text
+
+
+def test_clearing_the_eur_target_stops_tracking_euros(client, tmp_path):
+    client.post(
+        "/items/Sony A7 IV/update",
+        data={"target": "1500000", "currency": "HUF", "cooldown_days": "", "drop_alert_pct": "",
+              "enabled": "on", "eur_target": "1200"},
+    )
+    client.post(
+        "/items/Sony A7 IV/update",
+        data={"target": "1500000", "currency": "HUF", "cooldown_days": "", "drop_alert_pct": "",
+              "enabled": "on", "eur_target": ""},
+    )
+    assert "EUR" not in (tmp_path / "watchlist.yaml").read_text(encoding="utf-8")

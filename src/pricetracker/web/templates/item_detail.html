@@ -48,6 +48,16 @@
   </div>
   <div class="grid2">
     <div class="field">
+      <label for="eur_target">EUR target
+        <span class="muted">— for shops pricing in euros</span></label>
+      <input id="eur_target" name="eur_target" value="{{ item.targets.get('EUR', '') }}"
+             placeholder="1200">
+      <p class="muted" style="font-size:12px;margin:5px 0 0">
+        Prices are never converted. A euro shop is judged against this number, a
+        forint shop against the one above. Leave blank and euro shops are skipped.
+      </p>
+    </div>
+    <div class="field">
       <label for="drop_alert_pct">Also alert on a drop of (%)</label>
       <input id="drop_alert_pct" name="drop_alert_pct" value="{{ item.drop_alert_pct }}">
     </div>

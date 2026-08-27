@@ -54,15 +54,18 @@ def check_source(item: Item, source: Source, fetcher: Fetcher, store: Store, now
         return reading
 
     currency = extraction.currency or source.currency
-    if extraction.currency and source.currency and extraction.currency != source.currency:
-        # Comparing a EUR price against a HUF target would be worse than useless.
+    if extraction.currency and item.target_for(extraction.currency) is None:
+        # Comparing a EUR price against a HUF target would be worse than
+        # useless. A currency is only acceptable once the item has a target for
+        # it — add one under `targets:` to start tracking that currency.
         reading.status = STATUS_ERROR
         reading.price = extraction.price
         reading.currency = extraction.currency
         reading.method = extraction.method
         reading.error = (
-            f"currency mismatch: page says {extraction.currency}, "
-            f"watchlist says {source.currency}"
+            f"no target for {extraction.currency}: the page prices in "
+            f"{extraction.currency} but this item only targets "
+            f"{', '.join(item.tracked_currencies)}"
         )
         return reading
 
@@ -110,9 +113,8 @@ def run_check(
             readings = [check_source(item, source, fetcher, store, now) for source in item.sources]
             outcome.readings.extend(readings)
 
-            alert, outcome.state = evaluate(item, readings, store, outcome.state, now)
-            if alert is not None:
-                outcome.alerts.append(alert)
+            alerts, outcome.state = evaluate(item, readings, store, outcome.state, now)
+            outcome.alerts.extend(alerts)
     finally:
         if owns_fetcher:
             fetcher.close()

@@ -121,7 +121,7 @@ def subject(alerts: list[Alert], events: list[Event]) -> str:
     if alerts:
         first = alerts[0]
         assert first.best.price is not None
-        line = f"{first.item.name} is {format_price(first.best.price, first.item.currency)}"
+        line = f"{first.item.name} is {format_price(first.best.price, _alert_currency(first))}"
         extras = []
         if len(alerts) > 1:
             extras.append(f"+{len(alerts) - 1} more")
@@ -133,13 +133,19 @@ def subject(alerts: list[Alert], events: list[Event]) -> str:
     return f"{count} event{'s' if count != 1 else ''} coming up near you"
 
 
+def _alert_currency(alert: Alert) -> str | None:
+    """The currency actually compared, which is the shop's, not the item's."""
+    return alert.best.currency or alert.item.currency
+
+
 def _reason_text(alert: Alert) -> str:
+    currency = _alert_currency(alert)
     if alert.reason == REASON_TARGET:
-        return f"at or below your target of {format_price(alert.target, alert.item.currency)}"
+        return f"at or below your {currency} target of {format_price(alert.target, currency)}"
     if alert.median is not None:
         return (
-            f"sharp drop — {alert.item.drop_alert_pct:g}%+ below its recent median of "
-            f"{format_price(alert.median, alert.item.currency)}"
+            f"sharp drop — {alert.item.drop_alert_pct:g}%+ below its recent {currency} median of "
+            f"{format_price(alert.median, currency)}"
         )
     pct = alert.pct_change
     return f"dropped {pct:.1f}%" if pct is not None else "dropped"
@@ -160,7 +166,7 @@ def render_text(alerts: list[Alert], events: list[Event], failures: list[Reading
     if alerts:
         lines += ["PRICE ALERTS", ""]
         for alert in alerts:
-            currency = alert.item.currency
+            currency = _alert_currency(alert)
             assert alert.best.price is not None
             lines.append(alert.item.name)
             lines.append(f"  {format_price(alert.best.price, currency)} at {alert.best.shop}")
@@ -211,7 +217,7 @@ _HEADING = (
 
 
 def _price_card(alert: Alert) -> str:
-    currency = alert.item.currency
+    currency = _alert_currency(alert)
     assert alert.best.price is not None
     change = alert.pct_change
     change_html = ""

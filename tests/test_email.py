@@ -241,3 +241,38 @@ def test_a_digest_with_only_events_is_still_sent():
 def test_configured_answers_without_raising(env, expected):
     """Callers need to ask whether email is set up, not catch an exception."""
     assert EmailConfig.configured(env) is expected
+
+
+def test_a_euro_alert_reads_in_euros_not_forints():
+    """The item's primary currency is HUF; the alert came from a Slovak shop.
+    Rendering 1 150 as forints would be wildly misleading."""
+    from pricetracker.config import Item, Source
+
+    item = Item(
+        name="Sony A6700 váz",
+        target_price=Decimal("500000"),
+        targets={"EUR": Decimal("1200")},
+        currency="HUF",
+        cooldown_days=3,
+        drop_alert_pct=10.0,
+        alert_on_out_of_stock=False,
+        sources=[Source(url="https://obchod.sk/a6700", currency="EUR")],
+    )
+    best = Reading(
+        checked_at=NOW,
+        item=item.name,
+        url="https://obchod.sk/a6700",
+        shop="obchod.sk",
+        price=Decimal("1150"),
+        currency="EUR",
+        availability="in_stock",
+        method="json-ld",
+    )
+    alert = Alert(item=item, best=best, reason=REASON_TARGET, target=Decimal("1200"))
+
+    for body in (render_text([alert], [], []), render_html([alert], [], [])):
+        assert "€1,150.00" in body
+        assert "EUR target of €1,200.00" in body
+        assert "Ft" not in body
+
+    assert subject([alert], []) == "Price alert: Sony A6700 váz is €1,150.00"
