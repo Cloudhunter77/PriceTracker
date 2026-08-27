@@ -119,25 +119,26 @@ Then confirm the price can be read:
 pricetracker test-url https://www.alza.hu/sony-alpha-a7-iv-vaz-d6799672.htm
 ```
 
-### 2. Set up the alert email
+### 2. Set up the alert email — or don't
 
-Gmail won't accept your account password from a script — you need an **app
-password**:
+**Email is optional.** With no credentials set, the digest is printed to stdout
+instead of sent, so it shows up in the container log and the web UI still lists
+everything below its target. Nothing is skipped; you read your alerts rather than
+receive them.
+
+To actually send mail, Gmail needs an **app password**, not your account password:
 
 1. Turn on 2-Step Verification at [myaccount.google.com/security](https://myaccount.google.com/security)
 2. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
 3. Create one named `PriceTracker` and copy the 16-character code
 
-Add both as repository secrets under **Settings → Secrets and variables →
-Actions → New repository secret**:
+Then set these in the environment wherever it runs:
 
-| Secret | Value |
+| Variable | Value |
 | --- | --- |
 | `GMAIL_USER` | your Gmail address |
 | `GMAIL_APP_PASSWORD` | the 16-character app password |
-
-To send alerts somewhere other than your own inbox, add a repository *variable*
-`ALERT_EMAIL_TO` (comma-separated for several addresses).
+| `ALERT_EMAIL_TO` | optional; comma-separated, defaults to yourself |
 
 Not a Gmail user? Set `SMTP_HOST`, `SMTP_PORT`, and `SMTP_USE_SSL=false` for a
 provider that uses STARTTLS.
@@ -150,10 +151,16 @@ source before relying on it.
 
 ### 4. Let it run
 
-The [daily workflow](.github/workflows/daily-check.yml) runs `pricetracker daily`
-at 07:15 UTC — prices and events in one pass, one email — and commits the day's
-data back to the repo. Trigger it by hand from the **Actions** tab (**Run
-workflow**) to check it works; tick **dry run** to change nothing.
+`pricetracker schedule --at 08:00` runs the check once a day and keeps going —
+prices and events in one pass, one digest. In the container that is the
+`scheduler` service, and its output is `docker logs pricetracker-scheduler`.
+
+It is deliberately not cron: cron in a container does not inherit the
+environment, which is exactly how SMTP credentials go missing and alerts stop
+with no visible error.
+
+The [GitHub Actions workflow](.github/workflows/daily-check.yml) is still there
+for manual runs, but its schedule is **disabled** — see below for why.
 
 ## Running it locally
 

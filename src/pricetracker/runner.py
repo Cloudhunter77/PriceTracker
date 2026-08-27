@@ -81,8 +81,16 @@ def run_check(
     now: datetime | None = None,
     fetcher: Fetcher | None = None,
     only: str | None = None,
+    save_alert_state: bool = True,
 ) -> CheckOutcome:
-    """Check every enabled item and work out which ones deserve an alert."""
+    """Check every enabled item and work out which ones deserve an alert.
+
+    `save_alert_state` exists because "we have told the user" is only true once
+    delivery has actually happened. Callers that send a digest should pass False
+    and call `store.save_state(outcome.state)` themselves afterwards; otherwise a
+    failed send would mark the alert as delivered and the cooldown would bury it
+    for days.
+    """
     now = now or utcnow()
     outcome = CheckOutcome(state=store.load_state())
 
@@ -113,6 +121,7 @@ def run_check(
         # Appended after evaluation so that "previous price" comparisons are
         # made against earlier runs, not against this one.
         store.append(outcome.readings)
-        store.save_state(outcome.state)
+        if save_alert_state:
+            store.save_state(outcome.state)
 
     return outcome

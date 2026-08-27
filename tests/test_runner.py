@@ -228,3 +228,46 @@ def test_unreadable_state_file_is_treated_as_empty(store, payload):
     store.state_path.parent.mkdir(parents=True, exist_ok=True)
     store.state_path.write_text(payload, encoding="utf-8")
     assert store.load_state() == {}
+
+
+# ---- an alert is only "told" once it has been delivered ----------------
+
+
+def test_alert_state_can_be_withheld_until_delivery(store):
+    """The digest is sent after run_check returns, so marking the alert
+    delivered inside run_check would be a lie if the send then failed."""
+    fetcher = StubFetcher({ALZA: html("jsonld_product.html"), EMAG: html("jsonld_product.html")})
+
+    outcome = run_check(watchlist(), store, fetcher=fetcher, now=NOW, save_alert_state=False)
+
+    assert outcome.alerts, "the alert was still evaluated"
+    assert not store.state_path.exists(), "but not yet recorded as delivered"
+    assert store.history_path.exists(), "history is recorded either way"
+
+
+def test_a_withheld_alert_fires_again_next_run(store):
+    """What a failed send must leave behind: the same alert, still pending."""
+    pages = {ALZA: html("jsonld_product.html"), EMAG: html("jsonld_product.html")}
+
+    first = run_check(watchlist(), store, fetcher=StubFetcher(pages), now=NOW, save_alert_state=False)
+    assert len(first.alerts) == 1
+
+    tomorrow = NOW + timedelta(days=1)
+    reloaded = Store(history_path=store.history_path, state_path=store.state_path)
+    second = run_check(watchlist(), reloaded, fetcher=StubFetcher(pages), now=tomorrow, save_alert_state=False)
+
+    assert len(second.alerts) == 1, "an undelivered alert must not be suppressed"
+
+
+def test_saving_the_state_afterwards_suppresses_the_repeat(store):
+    """And once delivery succeeds and the caller saves, dedup works as before."""
+    pages = {ALZA: html("jsonld_product.html"), EMAG: html("jsonld_product.html")}
+
+    first = run_check(watchlist(), store, fetcher=StubFetcher(pages), now=NOW, save_alert_state=False)
+    store.save_state(first.state)  # what the CLI does after a successful delivery
+
+    tomorrow = NOW + timedelta(days=1)
+    reloaded = Store(history_path=store.history_path, state_path=store.state_path)
+    second = run_check(watchlist(), reloaded, fetcher=StubFetcher(pages), now=tomorrow, save_alert_state=False)
+
+    assert second.alerts == []

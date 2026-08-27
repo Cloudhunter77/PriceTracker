@@ -35,6 +35,16 @@ class EmailConfig:
     recipients: list[str]
     use_ssl: bool = True
 
+    @staticmethod
+    def configured(env: dict[str, str] | None = None) -> bool:
+        """Whether credentials are present, without raising.
+
+        Running with no email is a legitimate choice, not a failure, so callers
+        need a way to ask rather than catching an exception to find out.
+        """
+        env = os.environ if env is None else env
+        return bool(env.get("GMAIL_USER", "").strip() and env.get("GMAIL_APP_PASSWORD", "").strip())
+
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> EmailConfig:
         """Read SMTP settings from the environment.
@@ -48,7 +58,7 @@ class EmailConfig:
         if not username or not password:
             raise EmailError(
                 "email is not configured: set GMAIL_USER and GMAIL_APP_PASSWORD "
-                "(repository secrets in CI, environment variables locally)"
+                "in the environment"
             )
         recipients = [
             addr.strip()

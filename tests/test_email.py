@@ -223,3 +223,21 @@ def test_a_digest_with_only_events_is_still_sent():
     )
     with pytest.raises(EmailError, match="could not send"):
         send_digest([], [make_event()], [], config=config)
+
+
+# ---- email being off is a supported state ------------------------------
+
+
+@pytest.mark.parametrize(
+    "env,expected",
+    [
+        ({"GMAIL_USER": "me@gmail.com", "GMAIL_APP_PASSWORD": "x" * 16}, True),
+        ({}, False),
+        ({"GMAIL_USER": "me@gmail.com"}, False),
+        ({"GMAIL_APP_PASSWORD": "x"}, False),
+        ({"GMAIL_USER": "  ", "GMAIL_APP_PASSWORD": "x"}, False),
+    ],
+)
+def test_configured_answers_without_raising(env, expected):
+    """Callers need to ask whether email is set up, not catch an exception."""
+    assert EmailConfig.configured(env) is expected

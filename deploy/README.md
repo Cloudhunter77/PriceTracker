@@ -29,24 +29,44 @@ Find your pool name first. It is whatever is mounted under `/mnt`:
 ls /mnt
 ```
 
+> Pool names can contain surprising characters — one real pool here has a
+> **trailing space** in its name. Quote every path you type: `"/mnt/MY POOL /..."`.
+
 Then create the dataset **in the web UI**: **Datasets → select your pool → Add
 Dataset**, name it `pricetracker`.
 
-Use the UI rather than the command line. TrueNAS adds an ACL entry granting
-modify control to group `568` (Apps) when a dataset is created this way, and the
-containers run as that user. A dataset made with `zfs create` does not get that
-entry, and the failure shows up later as unwritable price history rather than as
-anything obviously permission-shaped.
+### Then check the permissions — do not assume them
+
+The containers run as uid/gid `568` (`apps`). Whether the new dataset is usable
+by that account depends on the pool's ACL type: on an **NFSv4 ACL** pool the UI
+adds an entry for the Apps group automatically, but on a pool using **classic
+Unix permissions** the dataset arrives owned by `root:root` with no access for
+`apps` at all. This has been seen in practice, so verify rather than trust it:
+
+```bash
+ls -ld /mnt/POOL/pricetracker        # want: drwxrwxr-x ... apps apps
+```
+
+If it says `root root`, fix it:
+
+```bash
+sudo chown -R 568:568 /mnt/POOL/pricetracker
+sudo chmod 775 /mnt/POOL/pricetracker
+```
+
+Getting this wrong shows up later as the container being unable to write price
+history, which is much harder to recognise than a permissions error.
 
 <details>
-<summary>Command-line alternative, if you prefer</summary>
+<summary>Creating the dataset from the command line instead</summary>
 
 ```bash
 sudo zfs create -p POOL/pricetracker
 sudo chown -R 568:568 /mnt/POOL/pricetracker
+sudo chmod 775 /mnt/POOL/pricetracker
 ```
 
-Substitute your real pool name for `POOL`.
+`zfs` lives in `/usr/sbin`, so it needs `sudo` to be found at all.
 </details>
 
 ## 2. Put your config in it
@@ -84,14 +104,31 @@ sudo docker run --rm ghcr.io/cloudhunter77/pricetracker:latest \
 [`docker-compose.yaml`](../docker-compose.yaml) with `/mnt/POOL/pricetracker`
 changed to your dataset's real path.
 
-Set the email credentials as environment variables in the app's config —
-**not** inline in the YAML, which TrueNAS stores in plain text:
+Set `TZ` in the YAML. Without it the container runs on UTC and `08:00` is the
+wrong 08:00:
 
-| Variable | Value |
-| --- | --- |
-| `GMAIL_USER` | your Gmail address |
-| `GMAIL_APP_PASSWORD` | a Google **app password**, not your account password |
-| `TZ` | `Europe/Budapest` — without it the container runs UTC and 08:00 is the wrong 08:00 |
+```yaml
+TZ: Europe/Budapest
+```
+
+## Email is optional
+
+TrueNAS has **no separate secrets field for apps installed via YAML** — a known,
+currently unimplemented feature. The only place `GMAIL_USER` and
+`GMAIL_APP_PASSWORD` can go is the same YAML box, which TrueNAS stores in plain
+text. So there are two honest options:
+
+**Leave email off.** This is fully supported. When no credentials are present the
+digest is printed instead of sent, so it appears in
+`sudo docker logs pricetracker-scheduler`, and the web UI shows every item below
+its target. Nothing is lost or skipped — you just read your alerts rather than
+receive them. Add credentials whenever you like.
+
+**Accept plaintext.** App → Application Info → Edit, and replace
+`${GMAIL_USER:-}` / `${GMAIL_APP_PASSWORD:-}` with real values. Use a Google
+**app password**, never your account password, and revoke it from your Google
+account if you ever change your mind — it grants mail-sending access to whoever
+can read that YAML.
 
 ## 5. Watch the first real run
 
@@ -128,5 +165,6 @@ fetches the current image. Your dataset is untouched.
 | `zfs: command not found` | Not root. Use `sudo zfs`. |
 | Permission denied writing `data/` | Dataset not owned by `568`. `sudo chown -R 568:568 /mnt/POOL/pricetracker` |
 | The run happens at the wrong time | `TZ` is unset, so the container is on UTC |
-| No email, no error | Credentials missing from the app config; check `sudo docker logs pricetracker-scheduler` |
+| No email, no error | Expected when credentials are unset — the digest is printed to the log instead |
+| `run failed` in the scheduler log | A real error. The log line above it says which stage |
 | A shop reports 403 | That retailer blocks automated clients. Check with `test-url`, and use a shop that works — see the notes in `watchlist.yaml` |

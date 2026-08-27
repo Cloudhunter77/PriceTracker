@@ -21,7 +21,8 @@ from .config import (
 from .extract import METHODS, extract_all
 from .fetch import Fetcher, FetchError
 from .format import format_price
-from .notify import EmailError, send_digest
+from .notify import EmailConfig, EmailError, send_digest
+from .notify.email import render_text
 from .runner import run_check
 from .store import HISTORY_FILE, STATE_FILE, Store
 from .events.config import DEFAULT_EVENTS_CONFIG, load_events_config
@@ -65,22 +66,36 @@ def _load(path: Path):
         raise typer.Exit(code=2)
 
 
-def _deliver(alerts, events, failures, *, dry_run: bool, no_email: bool) -> None:
-    """Send the digest, or explain why it wasn't sent."""
+def _deliver(alerts, events, failures, *, dry_run: bool, no_email: bool) -> bool:
+    """Get the digest to the user, and report whether they were actually told.
+
+    Three outcomes, not two. Email being switched off is a supported way to run
+    — the digest goes to stdout instead, which is what `docker logs` shows — and
+    that still counts as told. Only a send that was attempted and broke is an
+    error worth failing the run over.
+    """
     if not alerts and not events:
-        return
+        return True
     if dry_run:
-        console.print("[dim](dry run — no email sent, nothing recorded)[/dim]")
-        return
-    if no_email:
-        console.print("[dim](--no-email — recorded, but nothing sent)[/dim]")
-        return
+        console.print("[dim](dry run — nothing sent, nothing recorded)[/dim]")
+        console.print(render_text(alerts, events, failures))
+        return False
+
+    reason = "--no-email" if no_email else (None if EmailConfig.configured() else "email is not configured")
+    if reason:
+        console.print(f"[dim]({reason} — printing the digest instead)[/dim]")
+        console.print(render_text(alerts, events, failures))
+        return True
+
     try:
         if send_digest(alerts, events, failures):
             console.print("[green]Digest email sent.[/green]")
+        return True
     except EmailError as exc:
+        # Genuinely broken delivery. Returning False leaves the alert unrecorded
+        # so tomorrow tries again rather than burying it under the cooldown.
         console.print(f"[red]Email not sent: {exc}[/red]")
-        raise typer.Exit(code=1)
+        return False
 
 
 @app.command()
@@ -98,7 +113,7 @@ def check(
     config = _load(watchlist)
     store = Store()
 
-    outcome = run_check(config, store, dry_run=dry_run, only=item)
+    outcome = run_check(config, store, dry_run=dry_run, only=item, save_alert_state=False)
 
     table = Table(title="Prices checked", header_style="bold")
     table.add_column("Item")
@@ -140,7 +155,8 @@ def check(
     if outcome.failures:
         console.print(f"\n[yellow]{len(outcome.failures)} source(s) could not be read.[/yellow]")
 
-    _deliver(outcome.alerts, [], outcome.failures, dry_run=dry_run, no_email=no_email)
+    if _deliver(outcome.alerts, [], outcome.failures, dry_run=dry_run, no_email=no_email) and not dry_run:
+        store.save_state(outcome.state)
 
 
 @app.command("add")
@@ -468,7 +484,8 @@ def _run_daily(
     identically to one you start by hand.
     """
     price_config = _load(watchlist)
-    outcome = run_check(price_config, Store(), dry_run=dry_run)
+    store = Store()
+    outcome = run_check(price_config, store, dry_run=dry_run, save_alert_state=False)
     console.print(
         f"Checked {len(outcome.readings)} source(s): {len(outcome.successes)} ok, "
         f"{len(outcome.failures)} failed, {len(outcome.alerts)} alert(s)."
@@ -496,7 +513,10 @@ def _run_daily(
             for failure in event_outcome.failures:
                 console.print(f"[red]{failure.name}[/red]: {failure.error}")
 
-    _deliver(outcome.alerts, new_events, outcome.failures, dry_run=dry_run, no_email=no_email)
+    told = _deliver(outcome.alerts, new_events, outcome.failures, dry_run=dry_run, no_email=no_email)
+    if told and not dry_run:
+        # Only now is "the user has been told" true.
+        store.save_state(outcome.state)
 
 
 # ---- the web UI ---------------------------------------------------------
