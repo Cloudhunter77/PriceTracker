@@ -141,28 +141,45 @@ def _from_json_ld(html: str) -> Extraction | None:
     data = extruct.extract(html, syntaxes=["json-ld"], errors="ignore").get("json-ld", [])
     nodes = list(_walk(data))
 
-    # A Product's own offer is the most trustworthy thing on the page; a bare
-    # Offer node elsewhere may belong to a related/accessory product.
-    offers = [
+    # A Product's own offers are the most trustworthy thing on the page; a bare
+    # Offer node elsewhere may belong to a related or accessory product, so it
+    # is only consulted when the Product carries no usable offer of its own.
+    product_offers = [
         offer
         for node in nodes
         if _has_type(node, "Product")
         for offer in _walk(node.get("offers"))
     ]
-    offers += [node for node in nodes if _has_type(node, "Offer", "AggregateOffer")]
+    loose_offers = [node for node in nodes if _has_type(node, "Offer", "AggregateOffer")]
 
+    return _cheapest_offer(product_offers) or _cheapest_offer(loose_offers)
+
+
+def _cheapest_offer(offers: list[dict]) -> Extraction | None:
+    """The lowest-priced offer in a list, or None if none of them price.
+
+    Marketplace pages (eMAG and friends) list every seller as a separate Offer.
+    Taking whichever appeared first in the markup would quote a price you could
+    have beaten on the same page, so the cheapest one wins.
+    """
+    found: list[Extraction] = []
     for offer in offers:
         for key in ("price", "lowPrice"):
             price = _parse_price(offer.get(key))
             if price is not None:
-                return Extraction(
-                    price=price,
-                    method="json-ld",
-                    raw=str(offer.get(key)),
-                    currency=_normalise_currency(offer.get("priceCurrency")),
-                    availability=_normalise_availability(offer.get("availability")),
+                found.append(
+                    Extraction(
+                        price=price,
+                        method="json-ld",
+                        raw=str(offer.get(key)),
+                        currency=_normalise_currency(offer.get("priceCurrency")),
+                        availability=_normalise_availability(offer.get("availability")),
+                    )
                 )
-    return None
+                break
+    if not found:
+        return None
+    return min(found, key=lambda e: e.price)
 
 
 def _from_microdata(html: str) -> Extraction | None:

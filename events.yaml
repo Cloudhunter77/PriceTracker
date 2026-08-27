@@ -38,30 +38,26 @@ interests:
        film, mozi, tárlat, galéria, gallery, múzeum, museum]
 
 sources:
-  # --- general Budapest listings (verify each with test-source) ---
-  - name: port.hu
-    type: schemaorg
-    url: https://port.hu/programok/budapest
-
+  # Verified from the TrueNAS server on 2026-08-27.
+  #
+  # Listing pages carry no event markup — Google asks for it on each event's
+  # own page, so that is where these sites put it. `follow` makes the listing
+  # an index: links containing that path fragment get visited and read.
+  # Each link is a separate throttled request, so max_links keeps the daily
+  # run to about a minute per source.
   - name: We Love Budapest
     type: schemaorg
     url: https://welovebudapest.com/programok/
+    follow: /program/
+    max_links: 40
 
-  - name: Funzine
-    type: schemaorg
-    url: https://funzine.hu/events/
-
-  # --- venues often publish cleaner data than aggregators ---
-  - name: A38
-    type: schemaorg
-    url: https://www.a38.hu/hu/programok
-
-  - name: Akvárium Klub
-    type: schemaorg
-    url: https://akvariumklub.hu/programok/
-    enabled: false
-
-  # --- a calendar feed, if a venue offers one, looks like this ---
+  # Blocked or empty when tested, kept here so they aren't re-added by mistake:
+  #   port.hu, a38.hu       - 200 but zero structured data (JavaScript-rendered)
+  #   funzine.hu            - 200, no Event markup on listings; detail pages untested
+  #   songkick.com          - HTTP 406
+  #   bandsintown.com       - HTTP 403
+  #
+  # A venue's calendar feed, if you find one, is the most reliable source of all:
   # - name: Trafó
   #   type: ics
   #   url: https://example.hu/events.ics

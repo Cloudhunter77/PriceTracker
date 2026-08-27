@@ -1,10 +1,13 @@
 name: Daily price check
 
+# The daily schedule is deliberately disabled. Every scheduled run for nine
+# days returned HTTP 403 from every shop: retailers fingerprint the TLS
+# handshake, and GitHub's runners are in datacenter IP ranges they block. The
+# real schedule now runs on the TrueNAS server (see deploy/README.md), and two
+# schedulers writing data/ would only fight each other.
+#
+# Manual runs still work from the Actions tab if you want to test something.
 on:
-  schedule:
-    # 07:15 UTC daily. Deliberately not on the hour: scheduled workflows are
-    # queued at peak times and GitHub delays them.
-    - cron: "15 7 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

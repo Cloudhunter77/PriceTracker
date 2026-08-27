@@ -24,10 +24,11 @@ _CANCELLED = {"cancelled"}
 class IcsSource:
     """Every VEVENT in a calendar feed."""
 
-    def __init__(self, name: str, url: str, selector: str | None = None) -> None:
+    def __init__(self, name: str, url: str, **_ignored) -> None:
+        # A calendar feed is already the detail level, so link-following
+        # options are accepted and ignored rather than rejected.
         self.name = name
         self.url = url
-        self.selector = selector  # unused; kept for a uniform constructor
 
     def fetch(self, fetcher: Fetcher) -> list[Event]:
         try:

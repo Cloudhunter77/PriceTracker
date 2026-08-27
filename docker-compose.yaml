@@ -1,0 +1,52 @@
+# TrueNAS SCALE: Apps -> Discover -> three-dot menu -> Install via YAML.
+#
+# Before installing, create a dataset for the config and data, and copy
+# watchlist.yaml and events.yaml into it. Everything the tracker writes
+# (price history, alert state, the geocode cache) stays in that dataset, so
+# updating the image never loses your data.
+#
+# Replace /mnt/tank/apps/pricetracker below with your dataset's real path.
+
+name: pricetracker
+
+x-common: &common
+  image: pricetracker:latest
+  build: .
+  restart: unless-stopped
+  # TrueNAS's "apps" user. The dataset must be owned by it, otherwise the
+  # container cannot write price history:
+  #   chown -R 568:568 /mnt/tank/apps/pricetracker
+  user: "${PUID:-568}:${PGID:-568}"
+  environment: &env
+    # Without this the container runs in UTC and "08:00" is the wrong 08:00.
+    TZ: Europe/Budapest
+    GMAIL_USER: ${GMAIL_USER:-}
+    GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+    ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+  volumes:
+    - /mnt/tank/apps/pricetracker:/config
+
+services:
+  # The daily run. One process, holding the environment, logging to stdout —
+  # see it with: docker logs -f pricetracker-scheduler
+  scheduler:
+    <<: *common
+    container_name: pricetracker-scheduler
+    command: ["pricetracker", "schedule", "--at", "08:00"]
+
+  # The web UI. Bound to the host so a reverse proxy or cloudflared can reach
+  # it. NOTE: the UI has no authentication of its own — do not publish this
+  # port to the internet without an auth layer in front.
+  ui:
+    <<: *common
+    container_name: pricetracker-ui
+    command: ["pricetracker", "ui", "--host", "0.0.0.0", "--port", "8420", "--no-open"]
+    ports:
+      - "8420:8420"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8420/health')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

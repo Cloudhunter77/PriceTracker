@@ -142,3 +142,30 @@ def test_broken_json_ld_does_not_break_other_methods():
     result = extract_price(html)
     assert result.method == "opengraph"
     assert result.price == Decimal("99.90")
+
+
+def test_marketplace_page_quotes_the_cheapest_seller():
+    """eMAG-style pages list every seller as its own Offer; taking the first
+    would quote a price you could have beaten on the same page."""
+    html = """<html><script type="application/ld+json">
+    {"@type": "Product", "name": "Sony A7 IV",
+     "offers": [
+       {"@type": "Offer", "price": 870641, "priceCurrency": "HUF"},
+       {"@type": "Offer", "price": 849900, "priceCurrency": "HUF"},
+       {"@type": "Offer", "price": 899000, "priceCurrency": "HUF"}
+     ]}
+    </script></html>"""
+    result = extract_price(html)
+    assert result.price == Decimal("849900")
+    assert result.currency == "HUF"
+
+
+def test_product_offer_beats_a_cheaper_unrelated_offer():
+    """A cheap bare Offer is usually an accessory, so the Product's own offer
+    wins even when it costs more."""
+    html = """<html><script type="application/ld+json">
+    [{"@type": "Product", "name": "Camera",
+      "offers": {"@type": "Offer", "price": 748999, "priceCurrency": "HUF"}},
+     {"@type": "Offer", "price": 4990, "priceCurrency": "HUF"}]
+    </script></html>"""
+    assert extract_price(html).price == Decimal("748999")

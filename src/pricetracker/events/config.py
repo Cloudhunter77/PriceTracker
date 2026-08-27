@@ -48,6 +48,10 @@ class SourceConfig(BaseModel):
     type: str = "schemaorg"
     enabled: bool = True
     selector: str | None = None
+    # Listing pages usually carry no event markup — it lives on each event's own
+    # page. Set `follow` to the path fragment those links share.
+    follow: str | None = None
+    max_links: int = Field(default=40, gt=0, le=200)
 
     @field_validator("url")
     @classmethod

@@ -35,7 +35,13 @@ def build_source(config) -> EventSource:
     kind = config.type
     if kind not in SOURCE_TYPES:
         raise SourceError(f"unknown source type {kind!r}; known types: {', '.join(sorted(SOURCE_TYPES))}")
-    return SOURCE_TYPES[kind](name=config.name, url=config.url, selector=config.selector)
+    return SOURCE_TYPES[kind](
+        name=config.name,
+        url=config.url,
+        selector=config.selector,
+        follow=config.follow,
+        max_links=config.max_links,
+    )
 
 
 # Populated at the bottom of the concrete source modules to avoid import cycles.

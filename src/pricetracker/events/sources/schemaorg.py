@@ -12,8 +12,11 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 import extruct
+
+from parsel import Selector
 
 from ...extract import _has_type, _normalise_currency, _parse_price, _walk
 from ...fetch import Fetcher, FetchError
@@ -49,21 +52,97 @@ _ONLINE_ONLY = "onlineeventattendancemode"
 _CANCELLED = {"eventcancelled", "eventpostponed"}
 
 
+# Listing pages routinely carry no event markup at all: Google asks for it on
+# each event's own "leaf" page, so that is where sites put it. When `follow` is
+# set the listing is treated as an index and each matching link is visited.
+DEFAULT_MAX_LINKS = 40
+
+
 @register("schemaorg")
 class SchemaOrgSource:
-    """Every event marked up on a single page."""
+    """Events marked up on a page, optionally crawling one level deeper.
 
-    def __init__(self, name: str, url: str, selector: str | None = None) -> None:
+    Without `follow` this reads a single page. With it, the page is treated as a
+    listing: links whose path contains the pattern are visited and their markup
+    read instead. One level only — this is an index-and-detail reader, not a
+    crawler let loose on a site.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        url: str,
+        selector: str | None = None,
+        follow: str | None = None,
+        max_links: int = DEFAULT_MAX_LINKS,
+    ) -> None:
         self.name = name
         self.url = url
-        self.selector = selector  # unused; kept for a uniform constructor
+        self.selector = selector  # optional CSS scope for finding links
+        self.follow = follow
+        self.max_links = max_links
 
     def fetch(self, fetcher: Fetcher) -> list[Event]:
         try:
             page = fetcher.fetch(self.url)
         except FetchError as exc:
             raise SourceError(f"fetch failed: {exc}") from exc
-        return self.parse(page.html)
+
+        if not self.follow:
+            return self.parse(page.html)
+
+        links = self.find_links(page.html, page.url)
+        if not links:
+            raise SourceError(
+                f"no links matching {self.follow!r} on {page.url} — check the pattern, "
+                "or drop `follow` if the listing carries its own event markup"
+            )
+
+        events: list[Event] = []
+        seen: set[str] = set()
+        for link in links:
+            try:
+                detail = fetcher.fetch(link)
+            except FetchError as exc:
+                # One dead detail page must not lose the rest of the listing.
+                log.info("%s: skipping %s (%s)", self.name, link, exc)
+                continue
+            for event in self.parse(detail.html):
+                if event.url is None:
+                    event.url = link
+                if event.uid not in seen:
+                    seen.add(event.uid)
+                    events.append(event)
+        return events
+
+    def find_links(self, html: str, base_url: str) -> list[str]:
+        """Detail-page links from a listing, deduplicated and capped.
+
+        Capped because a listing can link to hundreds of pages and each one is a
+        separate throttled request; the daily run should take a minute, not an hour.
+        """
+        sel = Selector(text=html)
+        if self.selector:
+            sel = Selector(text="".join(sel.css(self.selector).getall()) or html)
+
+        host = urlsplit(base_url).netloc
+        links: list[str] = []
+        seen: set[str] = set()
+        for href in sel.css("a::attr(href)").getall():
+            absolute = urljoin(base_url, href.strip())
+            parts = urlsplit(absolute)
+            if parts.scheme not in ("http", "https") or parts.netloc != host:
+                continue  # stay on the site we were pointed at
+            if self.follow not in parts.path:
+                continue
+            clean = f"{parts.scheme}://{parts.netloc}{parts.path}"
+            if clean in seen:
+                continue
+            seen.add(clean)
+            links.append(clean)
+            if len(links) >= self.max_links:
+                break
+        return links
 
     def parse(self, html: str) -> list[Event]:
         """Pull every event out of a page's markup."""

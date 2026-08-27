@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Optional
@@ -33,6 +34,7 @@ app = typer.Typer(
     help="Track prices of your shopping list across shops and get alerted on drops.",
 )
 console = Console()
+log = logging.getLogger("pricetracker")
 
 WatchlistOption = typer.Option(DEFAULT_WATCHLIST, "--watchlist", "-w", help="Path to watchlist.yaml")
 
@@ -447,6 +449,24 @@ def daily(
     This is what the daily workflow runs.
     """
     _setup_logging(verbose)
+    _run_daily(
+        watchlist, config_path, dry_run=dry_run, no_email=no_email, skip_events=skip_events
+    )
+
+
+def _run_daily(
+    watchlist: Path,
+    config_path: Path,
+    *,
+    dry_run: bool = False,
+    no_email: bool = False,
+    skip_events: bool = False,
+) -> None:
+    """One full pass: prices, then events, then a single email.
+
+    Shared by the `daily` command and the scheduler so a timed run behaves
+    identically to one you start by hand.
+    """
     price_config = _load(watchlist)
     outcome = run_check(price_config, Store(), dry_run=dry_run)
     console.print(
@@ -501,6 +521,58 @@ def ui(
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     uvicorn.run("pricetracker.web.app:app", host=host, port=port, reload=reload, log_level="warning")
+
+
+# ---- the scheduler ------------------------------------------------------
+
+
+@app.command()
+def schedule(
+    at: str = typer.Option("08:00", "--at", help="Local time to run each day, HH:MM"),
+    watchlist: Path = WatchlistOption,
+    config_path: Path = EventsOption,
+    run_now: bool = typer.Option(False, "--run-now", help="Run once immediately, then wait"),
+    no_email: bool = typer.Option(False, "--no-email", help="Record, but send no email"),
+) -> None:
+    """Run the daily check on a timer, forever.
+
+    This is the container's long-running process. It keeps the environment (so
+    the SMTP credentials are actually present, unlike under cron) and logs each
+    run to stdout where `docker logs` will show it.
+    """
+    import time as _time
+
+    from .schedule import ScheduleError, parse_time, seconds_until
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    try:
+        target = parse_time(at)
+    except ScheduleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2)
+
+    log.info("scheduler started; running daily at %02d:%02d local time", target.hour, target.minute)
+    pending = run_now
+
+    while True:
+        if not pending:
+            wait = seconds_until(target, datetime.now())
+            log.info("next run in %.1f hours", wait / 3600)
+            _time.sleep(wait)
+
+        pending = False
+        started = datetime.now()
+        try:
+            _run_daily(watchlist, config_path, dry_run=False, no_email=no_email)
+        except Exception as exc:
+            # A failed run must never kill the scheduler; tomorrow may work.
+            log.error("run failed: %s: %s", type(exc).__name__, exc, exc_info=True)
+        log.info("run finished in %.0fs", (datetime.now() - started).total_seconds())
 
 
 if __name__ == "__main__":

@@ -1,42 +1,26 @@
 # What to watch, and when to shout about it.
 #
-# Add an item by hand, or run:
-#   pricetracker add <url> --name "Thing" --target 850000
+# Only shops that are actually reachable are listed here. Verified from the
+# TrueNAS server on 2026-08-27:
+#   works:   tripont.hu, emag.hu, edigital.hu, ipon.hu
+#   blocked: alza.hu, arukereso.hu, mediamarkt.hu, bhphotovideo.com (403 —
+#            TLS fingerprinting, no User-Agent fixes it)
 #
-# After adding a shop, check the price can actually be read:
+# Before adding a shop, test it: the UI's "Test this URL" button, or
 #   pricetracker test-url <url>
 
 defaults:
-  currency: HUF          # assumed for any item that doesn't say otherwise
+  currency: HUF
   cooldown_days: 3       # after alerting, stay quiet this long unless it drops further
   drop_alert_pct: 10     # also alert on a drop this far below the recent median
   alert_on_out_of_stock: false
 
 items:
-  # ---------------------------------------------------------------------
-  # Example: one item, watched at two shops, alerting on whichever is cheaper.
-  # Replace this with what you actually want to buy.
-  # ---------------------------------------------------------------------
-  - name: Sony Alpha A7 IV váz
-    target_price: 900000
+  - name: Sony A7 IV váz
+    # Seen at 748 999 Ft (Tripont) and 849 900 Ft (eMAG) on 2026-08-27.
+    # Set below the best price you've seen, or you'll be alerted immediately.
+    target_price: 700000
     currency: HUF
     sources:
-      - url: https://www.alza.hu/sony-alpha-a7-iv-vaz-d6799672.htm
-
-  - name: Sony a7 IV body
-    target_price: 1800
-    currency: USD
-    sources:
-      - url: https://www.bhphotovideo.com/c/product/1667800-REG/sony_ilce_7m4_b_alpha_a7_iv_mirrorless.html
-
-  # ---------------------------------------------------------------------
-  # A shop that doesn't publish price metadata needs a CSS selector.
-  # Find it with `pricetracker test-url <url>`, then uncomment:
-  # ---------------------------------------------------------------------
-  # - name: Peak Design Travel Tripod
-  #   target_price: 199000
-  #   sources:
-  #     - url: https://example.hu/travel-tripod
-  #       selector: .product-price .final
-  #
-  # Set `enabled: false` on an item to park it without deleting it.
+      - url: https://www.tripont.hu/tukor-nelkuli-fenykepezogepek/sony-alpha-7-iv-milc-fenykepezogep-vaz-376751-p376751.html
+      - url: https://www.emag.hu/sony-alpha-7-iv-full-frame-hibrid-kamera-vaz-fekete-ilce7m4b-cec/pd/DYBBZXMBM/
