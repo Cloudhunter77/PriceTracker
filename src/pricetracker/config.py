@@ -56,6 +56,10 @@ class Defaults(BaseModel):
         return _validate_currency(v)
 
 
+RENDER_MODES = ("http", "browser")
+SOURCE_TYPES = ("product", "aggregator")
+
+
 class Source(BaseModel):
     """One shop's product page for an item."""
 
@@ -66,6 +70,33 @@ class Source(BaseModel):
     # Resolved from the item/defaults when not set explicitly.
     currency: str | None = None
     label: str | None = None
+    # "http" is a plain request; "browser" runs real Chromium, which is slower
+    # and only needed for sites that answer a plain client with a JavaScript
+    # challenge instead of the page.
+    render: str = "http"
+    # "product" is one shop's own page. "aggregator" is a price-comparison page
+    # listing many shops at once, so it yields a reading per shop it names.
+    type: str = "product"
+
+    @field_validator("render")
+    @classmethod
+    def _known_render(cls, v: str) -> str:
+        mode = v.strip().casefold()
+        if mode not in RENDER_MODES:
+            raise ValueError(f"render must be one of {', '.join(RENDER_MODES)}, got {v!r}")
+        return mode
+
+    @field_validator("type")
+    @classmethod
+    def _known_type(cls, v: str) -> str:
+        kind = v.strip().casefold()
+        if kind not in SOURCE_TYPES:
+            raise ValueError(f"type must be one of {', '.join(SOURCE_TYPES)}, got {v!r}")
+        return kind
+
+    @property
+    def needs_browser(self) -> bool:
+        return self.render == "browser"
 
     @field_validator("url")
     @classmethod
@@ -218,6 +249,8 @@ def append_item(
     target_price: Decimal,
     currency: str | None = None,
     selector: str | None = None,
+    render: str | None = None,
+    type: str | None = None,
 ) -> None:
     """Add a source to the watchlist, creating the file or the item as needed.
 
@@ -234,9 +267,7 @@ def append_item(
         raise ConfigError(f"{path} must contain a YAML mapping at the top level.")
     raw.setdefault("items", [])
 
-    source: dict[str, str] = {"url": url}
-    if selector:
-        source["selector"] = selector
+    source = source_mapping(url, selector=selector, render=render, type=type)
 
     for existing in raw["items"]:
         if str(existing.get("name", "")).casefold() == name.casefold():
@@ -256,6 +287,28 @@ def append_item(
     Watchlist.model_validate(raw)
     with path.open("w", encoding="utf-8") as fh:
         yaml.dump(raw, fh)
+
+
+def source_mapping(
+    url: str,
+    *,
+    selector: str | None = None,
+    render: str | None = None,
+    type: str | None = None,
+) -> dict[str, str]:
+    """A source as it should be written to YAML.
+
+    Defaults are left out rather than written as `render: http`, so the file
+    stays about the shops rather than about the machinery.
+    """
+    source: dict[str, str] = {"url": url}
+    if selector:
+        source["selector"] = selector
+    if render and render != "http":
+        source["render"] = render
+    if type and type != "product":
+        source["type"] = type
+    return source
 
 
 @contextmanager

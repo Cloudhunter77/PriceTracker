@@ -19,6 +19,11 @@ dependencies = [
     "python-multipart>=0.0.9",
 ]
 
+[project.optional-dependencies]
+# Only needed for sources with `render: browser`. Kept out of the base install
+# so a plain checkout stays small; the published container image includes it.
+browser = ["playwright>=1.47"]
+
 [project.scripts]
 pricetracker = "pricetracker.cli:app"
 

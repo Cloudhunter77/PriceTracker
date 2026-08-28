@@ -14,12 +14,13 @@ from rich.table import Table
 
 from .config import (
     DEFAULT_WATCHLIST,
+    RENDER_MODES,
     ConfigError,
     append_item,
     load_watchlist,
 )
 from .extract import METHODS, extract_all
-from .fetch import Fetcher, FetchError
+from .fetch import PROBE_PROFILE, BrowserFetcher, Fetcher, FetchError, looks_like_challenge
 from .format import format_price
 from .notify import EmailConfig, EmailError, send_digest
 from .notify.email import render_text
@@ -168,6 +169,14 @@ def add_source(
     selector: Optional[str] = typer.Option(
         None, "--selector", "-s", help="CSS/XPath for shops without price metadata"
     ),
+    render: str = typer.Option(
+        "http", "--render", help="http (a plain request) or browser (real Chromium)"
+    ),
+    source_type: str = typer.Option(
+        "product",
+        "--type",
+        help="product (one shop's page) or aggregator (a price-comparison page)",
+    ),
     watchlist: Path = WatchlistOption,
 ) -> None:
     """Add a product URL to the watchlist."""
@@ -185,13 +194,18 @@ def add_source(
             target_price=target_price,
             currency=currency,
             selector=selector,
+            render=render,
+            type=source_type,
         )
     except (ConfigError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2)
 
     console.print(f"[green]Added[/green] {name} → {url}")
-    console.print(f"Check it parses with: [bold]pricetracker test-url {url}[/bold]")
+    probe = f"pricetracker test-url {url}"
+    if render == "browser":
+        probe += " --render browser"
+    console.print(f"Check it parses with: [bold]{probe}[/bold]")
 
 
 @app.command("list")
@@ -252,6 +266,9 @@ def history(
 def test_url(
     url: str = typer.Argument(..., help="Product page URL to probe"),
     selector: Optional[str] = typer.Option(None, "--selector", "-s", help="CSS/XPath to try"),
+    render: str = typer.Option(
+        "http", "--render", help="http (a plain request) or browser (real Chromium)"
+    ),
     save: bool = typer.Option(False, "--save", help="Write the fetched HTML to data/debug/"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
@@ -259,14 +276,37 @@ def test_url(
 
     Use this when adding a shop: if only the selector row has a price, keep the
     selector in the watchlist; if a metadata row works, drop the selector.
+
+    If a shop answers with "Just a moment…" instead of the page, retry with
+    --render browser, which runs the site's JavaScript in real Chromium.
     """
     _setup_logging(verbose)
-    with Fetcher(user_agent=_load_user_agent()) as fetcher:
+    if render not in RENDER_MODES:
+        console.print(f"[red]--render must be one of {', '.join(RENDER_MODES)}[/red]")
+        raise typer.Exit(code=2)
+
+    if render == "browser":
+        console.print("[dim]Starting Chromium (first run also solves any challenge)…[/dim]")
+        # A probe profile, not the daily run's: Chromium locks its profile,
+        # and probing while the scheduler is mid-run should not fail.
+        opener = BrowserFetcher(user_agent=_load_user_agent(), profile_dir=PROBE_PROFILE)
+    else:
+        opener = Fetcher(user_agent=_load_user_agent())
+
+    with opener as fetcher:
         try:
             page = fetcher.fetch(url)
         except FetchError as exc:
             console.print(f"[red]Could not fetch: {exc}[/red]")
+            if render == "http" and looks_like_challenge(str(exc)):
+                console.print("Try [bold]--render browser[/bold].")
             raise typer.Exit(code=1)
+
+    if render == "http" and looks_like_challenge(page.html):
+        console.print(
+            "[yellow]That is a JavaScript challenge page, not the product page.[/yellow] "
+            "Retry with [bold]--render browser[/bold].\n"
+        )
 
     console.print(f"Fetched [bold]{page.url}[/bold] (HTTP {page.status_code}, {len(page.html):,} bytes)\n")
     results = extract_all(page.html, selector)

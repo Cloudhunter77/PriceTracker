@@ -107,6 +107,74 @@ def extract_product(html: str) -> Product | None:
     return None
 
 
+@dataclass(slots=True)
+class SellerOffer:
+    """One shop's offer, as listed by a price-comparison page.
+
+    An aggregator's whole value is that it names who is selling at what price,
+    so this keeps the seller alongside the number.
+    """
+
+    price: Decimal
+    currency: str | None = None
+    seller: str | None = None
+    availability: str | None = None
+    url: str | None = None
+
+
+# Enough to cover a busy comparison page without letting a malformed one turn
+# into hundreds of history rows a day.
+MAX_SELLER_OFFERS = 30
+
+
+def extract_offers(html: str) -> list[SellerOffer]:
+    """Every named shop's offer on a price-comparison page, cheapest first.
+
+    Returns an empty list when the page names no sellers — the caller then falls
+    back to the market low, which is all an aggregator without seller markup can
+    honestly tell us.
+    """
+    data = extruct.extract(html, syntaxes=["json-ld", "microdata"], errors="ignore")
+    nodes = list(_walk(data.get("json-ld", [])))
+    for node in _walk(data.get("microdata", [])):
+        props = node.get("properties")
+        if isinstance(props, dict):
+            nodes.append({"@type": node.get("type", ""), **props})
+
+    found: dict[tuple[str, Decimal], SellerOffer] = {}
+    for node in nodes:
+        if not _has_type(node, "Offer"):
+            continue
+        price = _parse_price(node.get("price"))
+        if price is None:
+            continue
+        seller = _seller_name(node)
+        if not seller:
+            continue
+        key = (seller.casefold(), price)
+        if key in found:
+            continue
+        found[key] = SellerOffer(
+            price=price,
+            currency=_normalise_currency(node.get("priceCurrency")),
+            seller=seller,
+            availability=_normalise_availability(node.get("availability")),
+            url=_first_string(node.get("url")),
+        )
+
+    offers = sorted(found.values(), key=lambda o: o.price)
+    return offers[:MAX_SELLER_OFFERS]
+
+
+def _seller_name(offer: dict) -> str | None:
+    """Who is selling, under whichever of the several schema.org spellings."""
+    for key in ("seller", "offeredBy", "provider"):
+        name = _first_string(offer.get(key))
+        if name:
+            return name
+    return None
+
+
 def _first_string(value: Any) -> str | None:
     """Flatten the shapes a schema.org string value arrives in."""
     if isinstance(value, str):

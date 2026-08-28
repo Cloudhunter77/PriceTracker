@@ -2,9 +2,11 @@
 #
 # Only shops that are actually reachable are listed here. Verified from the
 # TrueNAS server on 2026-08-27:
-#   works:   tripont.hu, emag.hu, edigital.hu, ipon.hu
-#   blocked: alza.hu, arukereso.hu, mediamarkt.hu, bhphotovideo.com (403 —
-#            TLS fingerprinting, no User-Agent fixes it)
+#   works over plain HTTP:  tripont.hu, emag.hu, edigital.hu, ipon.hu
+#   needs `render: browser`: arukereso.hu, heureka.sk (Cloudflare JS challenge —
+#            a real browser runs it; see "Price-comparison pages" in the README)
+#   out of reach:           alza.hu, mediamarkt.hu, bhphotovideo.com (403 at the
+#            TLS handshake, before any page is served; nothing here fixes that)
 #
 # Before adding a shop, test it: the UI's "Test this URL" button, or
 #   pricetracker test-url <url>
@@ -29,3 +31,11 @@ items:
     sources:
       - url: https://www.tripont.hu/tukor-nelkuli-fenykepezogepek/sony-alpha-7-iv-milc-fenykepezogep-vaz-376751-p376751.html
       - url: https://www.emag.hu/sony-alpha-7-iv-full-frame-hibrid-kamera-vaz-fekete-ilce7m4b-cec/pd/DYBBZXMBM/
+      # One Árukereső page covers every Hungarian shop selling this, so it is
+      # worth more than a list of shops added by hand. `type: aggregator` makes
+      # it one reading per shop; `render: browser` runs the site's JavaScript
+      # challenge in real Chromium. Find the page's URL on arukereso.hu and
+      # check it first with: pricetracker test-url <url> --render browser
+      # - url: https://www.arukereso.hu/.../sony-alpha-7-iv-p1
+      #   type: aggregator
+      #   render: browser

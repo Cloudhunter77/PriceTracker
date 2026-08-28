@@ -60,6 +60,53 @@ Most real shops — Alza, eMAG, MediaMarkt, B&H, Best Buy — work through one o
 the metadata methods with no per-site configuration. The selector is there for
 the ones that don't.
 
+## Price-comparison pages
+
+One Árukereső page carries the whole Hungarian market for a product: every shop
+selling it, with its price. Tracking that page is worth more than tracking a
+dozen shops by hand, and it keeps working when a shop you never configured
+undercuts everyone.
+
+```yaml
+sources:
+  - url: https://www.arukereso.hu/fenykepezogep-c3128/sony/alpha-a6700-p1
+    type: aggregator     # read as many shops, not one
+    render: browser      # this site needs JavaScript run
+```
+
+`type: aggregator` turns one page into **one reading per shop it names**, so
+each shop gets its own line in the history and its own chart series, and the
+cheapest of them is what your target is compared against. If a comparison page
+publishes no per-shop markup, the market low — the "513 120 Ft-tól" figure — is
+recorded instead, which is the only number such a page actually promises.
+
+`render: browser` runs the page in real Chromium instead of making a plain HTTP
+request. Árukereső and Heureka answer a plain request with Cloudflare's "Just a
+moment…" challenge, which is a page asking to be executed rather than a header
+to get right. Chromium executes it and carries on.
+
+Two things worth knowing about it:
+
+- **It is opt-in per source.** A watchlist with no `render: browser` never
+  starts a browser, and the daily run stays in milliseconds.
+- **The browser profile persists** in `data/browser/`, so the clearance cookie
+  from a solved challenge is reused. The challenge is solved roughly once, not
+  every morning — faster for you and much less load on them.
+
+Probe one before committing it:
+
+```bash
+pricetracker test-url <url> --render browser
+```
+
+In the UI this is the **Kind of page** dropdown when you add a shop.
+
+**Where this stops.** Some sites reject the TLS handshake before any JavaScript
+runs — Alza, MediaMarkt and B&H do, from this network — and no browser setting
+reaches that. Running a site's own challenge is fair; forging fingerprints or
+solving CAPTCHAs is a different activity and this tool does not do it. If a
+page still shows the challenge after 30 seconds, the run says so and moves on.
+
 ## How it finds events
 
 The same trick, pointed at `schema.org/Event` instead of `Product`. Two kinds of
@@ -171,6 +218,14 @@ uv run pricetracker daily --dry-run     # check everything, change nothing
 uv run pricetracker daily               # check, record, and email
 ```
 
+Tracking a comparison page needs Chromium, which the container image already
+has. Locally, install it once:
+
+```bash
+uv sync --extra browser
+uv run playwright install chromium
+```
+
 For a local email test, export the same variables first:
 
 ```bash
@@ -187,7 +242,7 @@ export GMAIL_USER=you@gmail.com GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 | `add <url>` | Add a product URL to the watchlist |
 | `list` | Show the watchlist and the latest price of each item |
 | `history [item]` | Show recorded price history |
-| `test-url <url>` | Probe one URL and show what each price method finds |
+| `test-url <url>` | Probe one URL and show what each price method finds (`--render browser` for sites that need JavaScript) |
 | `find <item>` | Search other shops for something you already track |
 | `test-search <shop> <query>` | Probe one shop's search and show what it yields |
 | `events check` | Scan event sources |
@@ -266,10 +321,11 @@ Set the EUR target in the web UI on the item page, or in `watchlist.yaml`.
 
 ## When a shop doesn't work
 
-Run `pricetracker test-url <url>`. If every method comes up empty, the shop
-renders its price in JavaScript or blocked the request. Open the page in a
-browser, right-click the price → Inspect, copy a CSS selector for that element,
-and confirm it:
+Run `pricetracker test-url <url>`. If it reports a JavaScript challenge, retry
+with `--render browser` — that is a different problem with a different fix, and
+no selector will help. If every method simply comes up empty, the shop renders
+its price in JavaScript. Open the page in a browser, right-click the price →
+Inspect, copy a CSS selector for that element, and confirm it:
 
 ```bash
 pricetracker test-url <url> --selector ".product-price .final"
@@ -323,9 +379,9 @@ uv run pricetracker history | tail -20
 ## Things worth knowing
 
 **Amazon is not supported.** It blocks datacenter IPs and renders prices in
-JavaScript. Supporting it properly needs a headless browser or a paid API, and
-would still break regularly. Note that plenty of *other* shops block Actions
-runners too — see "If a shop returns 403" above.
+JavaScript. Supporting it properly needs a paid API, and would still break
+regularly. Note that plenty of *other* shops block Actions runners too — see
+"If a shop returns 403" above.
 
 **You won't be spammed.** Once an item alerts, it stays quiet until the price
 drops at least another 1% or `cooldown_days` pass. If the price recovers and
@@ -361,6 +417,8 @@ identifying User-Agent this is negligible load; set `respect_robots: true` under
 | `data/events_seen.json` | Events already mentioned, so they aren't repeated |
 | `data/geocache.json` | Cached venue coordinates |
 | `data/debug/` | Pages that failed to parse (git-ignored) |
+| `data/browser/` | Chromium's profile, so a solved challenge is not re-solved daily (git-ignored) |
+| `data/browser-probe/` | The same, for `test-url` and the UI's probe — a profile can't be shared between two processes (git-ignored) |
 
 ## Development
 

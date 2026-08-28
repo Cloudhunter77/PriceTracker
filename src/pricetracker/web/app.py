@@ -22,6 +22,7 @@ from ..config import (
     ConfigError,
     Watchlist,
     append_item,
+    source_mapping,
     edit_watchlist,
     find_raw_item,
     load_watchlist,
@@ -30,8 +31,14 @@ from ..config import (
 from ..events.config import DEFAULT_EVENTS_CONFIG, EventsConfig, load_events_config, load_raw
 from ..events.runner import check_events
 from ..events.store import EventStore
-from ..extract import METHODS, extract_all
-from ..fetch import Fetcher, FetchError
+from ..extract import METHODS, extract_all, extract_offers
+from ..fetch import (
+    PROBE_PROFILE,
+    BrowserFetcher,
+    Fetcher,
+    FetchError,
+    looks_like_challenge,
+)
 from ..format import format_distance, format_event_when, format_price
 from ..runner import run_check
 from ..store import Store
@@ -177,8 +184,26 @@ def new_item(request: Request):
     )
 
 
+# What the "kind of page" dropdown means. The user picks how a page behaves;
+# the two flags that follow from it are machinery they should not have to know.
+SOURCE_KINDS = {
+    "shop": ("http", "product"),
+    "shop_browser": ("browser", "product"),
+    "compare": ("browser", "aggregator"),
+}
+
+
+def _kind_flags(kind: str) -> tuple[str, str]:
+    return SOURCE_KINDS.get(kind, SOURCE_KINDS["shop"])
+
+
 @app.post("/items/test", response_class=HTMLResponse)
-def test_item_url(request: Request, url: str = Form(...), selector: str = Form("")):
+def test_item_url(
+    request: Request,
+    url: str = Form(...),
+    selector: str = Form(""),
+    kind: str = Form("shop"),
+):
     """Probe a URL and report what each extraction method found.
 
     This is the reason the UI beats the CLI for adding things: you see whether a
@@ -191,16 +216,37 @@ def test_item_url(request: Request, url: str = Form(...), selector: str = Form("
         )
 
     config = _watchlist()
+    render, source_type = _kind_flags(kind)
+    if render == "browser":
+        opener = BrowserFetcher(
+            user_agent=config.defaults.user_agent, profile_dir=PROBE_PROFILE
+        )
+    else:
+        opener = Fetcher(user_agent=config.defaults.user_agent)
     try:
-        with Fetcher(user_agent=config.defaults.user_agent) as fetcher:
+        with opener as fetcher:
             page = fetcher.fetch(url)
     except FetchError as exc:
         return templates.TemplateResponse(
             request, "_probe.html", {"request": request, "error": f"Could not fetch: {exc}"}
         )
 
+    if render == "http" and looks_like_challenge(page.html):
+        return templates.TemplateResponse(
+            request, "_probe.html",
+            {
+                "request": request,
+                "error": (
+                    "This shop answered with a \u201cJust a moment\u2026\u201d challenge "
+                    "instead of the page. Set the kind of page to one of the browser "
+                    "options and test again."
+                ),
+            },
+        )
+
     found = extract_all(page.html, selector.strip() or None)
     winner = next((m for m in METHODS if m in found), None)
+    offers = extract_offers(page.html) if source_type == "aggregator" else []
     return templates.TemplateResponse(
         request, "_probe.html",
         {
@@ -209,6 +255,8 @@ def test_item_url(request: Request, url: str = Form(...), selector: str = Form("
             "found": found,
             "winner": winner,
             "selector": selector.strip(),
+            "offers": offers,
+            "aggregator": source_type == "aggregator",
             "suggest_price": found[winner].price if winner else None,
             "suggest_currency": found[winner].currency if winner else None,
         },
@@ -222,12 +270,14 @@ def create_item(
     target: str = Form(...),
     currency: str = Form(""),
     selector: str = Form(""),
+    kind: str = Form("shop"),
 ):
     try:
         target_price = Decimal(target.replace(" ", "").replace(",", ""))
     except InvalidOperation:
         return _redirect("/items/new", error=f"{target!r} is not a number.")
 
+    render, source_type = _kind_flags(kind)
     gitsync.pull()
     try:
         append_item(
@@ -237,6 +287,8 @@ def create_item(
             target_price=target_price,
             currency=currency.strip() or None,
             selector=selector.strip() or None,
+            render=render,
+            type=source_type,
         )
     except (ConfigError, ValueError) as exc:
         return _redirect("/items/new", error=str(exc))
@@ -307,7 +359,12 @@ def update_item(
 
 
 @app.post("/items/{name}/sources")
-def add_item_source(name: str, url: str = Form(...), selector: str = Form("")):
+def add_item_source(
+    name: str,
+    url: str = Form(...),
+    selector: str = Form(""),
+    kind: str = Form("shop"),
+):
     gitsync.pull()
     try:
         with edit_watchlist(DEFAULT_WATCHLIST) as raw:
@@ -317,10 +374,15 @@ def add_item_source(name: str, url: str = Form(...), selector: str = Form("")):
             urls = {str(s.get("url")) for s in entry.get("sources", [])}
             if url.strip() in urls:
                 return _redirect(f"/items/{name}", error="That shop is already tracked here.")
-            source: dict[str, str] = {"url": url.strip()}
-            if selector.strip():
-                source["selector"] = selector.strip()
-            entry.setdefault("sources", []).append(source)
+            render, source_type = _kind_flags(kind)
+            entry.setdefault("sources", []).append(
+                source_mapping(
+                    url.strip(),
+                    selector=selector.strip() or None,
+                    render=render,
+                    type=source_type,
+                )
+            )
     except (ConfigError, ValueError) as exc:
         return _redirect(f"/items/{name}", error=str(exc))
     return _redirect(f"/items/{name}", flash="Shop added.")

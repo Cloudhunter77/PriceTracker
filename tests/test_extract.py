@@ -9,6 +9,7 @@ from pricetracker.extract import (
     _normalise_availability,
     _parse_price,
     extract_all,
+    extract_offers,
     extract_price,
 )
 
@@ -169,3 +170,51 @@ def test_product_offer_beats_a_cheaper_unrelated_offer():
      {"@type": "Offer", "price": 4990, "priceCurrency": "HUF"}]
     </script></html>"""
     assert extract_price(html).price == Decimal("748999")
+
+
+# ---- price-comparison pages --------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def fixture(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def test_every_named_shop_is_read_cheapest_first():
+    offers = extract_offers(fixture("aggregator_arukereso.html"))
+    assert [o.seller for o in offers] == ["Tripont   Foto", "Fotoplus", "eMAG"]
+    assert [o.price for o in offers] == [Decimal("513120"), Decimal("526000"), Decimal("579900")]
+
+
+def test_an_offer_with_no_seller_is_left_out():
+    """An unattributable price is not a shop. Reporting it as one would invite a
+    click on a listing that names nowhere to buy it."""
+    offers = extract_offers(fixture("aggregator_arukereso.html"))
+    assert Decimal("540000") not in [o.price for o in offers]
+
+
+def test_stock_and_links_come_through_when_the_page_gives_them():
+    offers = {o.seller: o for o in extract_offers(fixture("aggregator_arukereso.html"))}
+    assert offers["eMAG"].availability == "out_of_stock"
+    assert offers["Fotoplus"].url == "https://www.fotoplus.hu/sony-a6700-vaz"
+    assert offers["eMAG"].url is None
+
+
+def test_a_page_without_seller_markup_yields_no_offers():
+    assert extract_offers(fixture("aggregator_no_sellers.html")) == []
+
+
+def test_the_market_low_is_still_readable_from_an_aggregate_offer():
+    """`lowPrice` is the "513 120 Ft-tól" figure — the only number a comparison
+    page without seller markup actually promises."""
+    found = extract_price(fixture("aggregator_no_sellers.html"))
+    assert found.price == Decimal("513120")
+    assert found.currency == "HUF"
+
+
+def test_an_ordinary_product_page_lists_no_sellers():
+    """extract_offers must not mistake a shop's own single offer for a market."""
+    assert extract_offers(fixture("jsonld_product.html")) == []

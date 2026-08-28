@@ -10,6 +10,19 @@
     <input id="url" name="url" placeholder="https://www.alza.hu/..." required>
   </div>
 
+  <div class="field">
+    <label for="kind">Kind of page</label>
+    <select id="kind" name="kind">
+      <option value="shop">Shop page</option>
+      <option value="shop_browser">Shop page that blocks plain requests &mdash; use a browser</option>
+      <option value="compare">Price-comparison page (&Aacute;rukeres&#337;, Heureka) &mdash; use a browser</option>
+    </select>
+    <p class="muted" style="font-size:13px;margin:6px 0 0">
+      A comparison page is read as many shops at once: one reading per shop it names.
+      Browser pages are slower, so leave this on &ldquo;Shop page&rdquo; unless a plain test fails.
+    </p>
+  </div>
+
   <div class="row" style="margin-bottom:8px">
     <button class="btn ghost" type="button" onclick="probe()">Test this URL</button>
     <span class="muted" style="font-size:13px">Optional, but it saves a surprise tomorrow.</span>
@@ -52,10 +65,13 @@
     const form = document.getElementById('addform');
     const target = document.getElementById('probe');
     if (!form.url.value.trim()) { form.url.focus(); return; }
-    target.innerHTML = '<div class="job">Fetching the page&hellip;</div>';
+    target.innerHTML = form.kind.value === 'shop'
+      ? '<div class="job">Fetching the page&hellip;</div>'
+      : '<div class="job">Starting a browser and fetching the page&hellip; this takes a few seconds.</div>';
     const data = new FormData();
     data.append('url', form.url.value);
     data.append('selector', form.selector.value);
+    data.append('kind', form.kind.value);
     try {
       const response = await fetch('/items/test', { method: 'POST', body: data });
       target.innerHTML = await response.text();

@@ -1,7 +1,11 @@
-# Small on purpose: the tracker reads structured metadata over plain HTTP, so
-# there is no browser to ship. The image is code only — your watchlist, events
-# config and price history live in a bind-mounted volume, so pulling a new image
-# never touches your data.
+# Two ways of reading a page ship in this image.
+#
+# Almost every shop is read over plain HTTP by parsing the structured product
+# metadata it already publishes. A few — price-comparison sites in particular —
+# answer a plain request with a JavaScript challenge instead of the page, so
+# real Chromium is here too, used only by sources marked `render: browser`.
+# That is most of the image's size; the tracker still starts it only when a
+# watchlist actually asks for it.
 FROM python:3.11-slim
 
 # tini reaps zombies and forwards signals, so `docker stop` actually stops the
@@ -19,14 +23,26 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
+# Chromium goes somewhere world-readable rather than into root's cache, because
+# the container runs as uid 568 and could not read it there. HOME has to be
+# writable too, and /config is the bind mount, so it is.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
+    HOME=/config
+
 WORKDIR /src
 
 # Dependencies first, so editing the source doesn't re-resolve the whole lock.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev --extra browser
 
 COPY src/ ./src/
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra browser
+
+# --with-deps pulls the system libraries Chromium needs; matching them by hand
+# is a moving target that Playwright already tracks.
+RUN playwright install --with-deps chromium \
+ && chmod -R a+rX /opt/pw-browsers \
+ && rm -rf /var/lib/apt/lists/*
 
 # The app reads watchlist.yaml and writes data/ relative to the working
 # directory, so /config is where your bind mount goes.

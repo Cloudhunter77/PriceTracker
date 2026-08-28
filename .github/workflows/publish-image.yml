@@ -57,3 +57,27 @@ jobs:
         run: |
           docker run --rm ${{ env.IMAGE }}:${{ github.sha }} pricetracker --help
           docker run --rm ${{ env.IMAGE }}:${{ github.sha }} pricetracker schedule --help
+
+      - name: Prove Chromium runs as the unprivileged user the NAS uses
+        # Not "does the binary exist" — the failure mode that actually bites is
+        # uid 568 being unable to read the browser or write its profile, which
+        # only shows up when it runs as that user against a bind mount.
+        run: |
+          mkdir -p smoke && chmod 777 smoke
+          cat > smoke/page.html <<'HTML'
+          <html><head><script type="application/ld+json">
+          {"@context":"https://schema.org","@type":"Product","name":"Smoke",
+           "offers":{"@type":"Offer","price":"123","priceCurrency":"HUF"}}
+          </script></head><body>ok</body></html>
+          HTML
+          docker run --rm --user 568:568 -v "$PWD/smoke:/config" \
+            ${{ env.IMAGE }}:${{ github.sha }} python -c "
+          from pricetracker.extract import extract_price
+          from pricetracker.fetch import BrowserFetcher
+          with BrowserFetcher() as browser:
+              page = browser.fetch('file:///config/page.html')
+          found = extract_price(page.html)
+          assert str(found.price) == '123', found
+          print('chromium ok, read', found.price, found.currency)
+          "
+          test -d smoke/data/browser || (echo "browser profile was not written"; exit 1)

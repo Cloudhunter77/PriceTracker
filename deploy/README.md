@@ -81,12 +81,17 @@ sudo chown 568:568 *.yaml
 ## 3. Check it works before scheduling anything
 
 ```bash
-sudo docker run --rm \
+sudo docker run --rm --user 568:568 \
   -v /mnt/POOL/pricetracker:/config \
   -e TZ=Europe/Budapest \
   ghcr.io/cloudhunter77/pricetracker:latest \
   pricetracker daily --dry-run
 ```
+
+> **`--user 568:568` matters here.** Without it this runs as root and any file
+> or directory it creates in the dataset — `data/` above all — comes out
+> root-owned. The app then fails to write price history once it is running
+> under the app account, days later, for a reason that no longer looks related.
 
 `--dry-run` reads real prices but records nothing and sends no email. You should
 see a price from each shop.
@@ -94,9 +99,30 @@ see a price from each shop.
 If a shop errors, probe it the same way to see what the page actually offers:
 
 ```bash
-sudo docker run --rm ghcr.io/cloudhunter77/pricetracker:latest \
+sudo docker run --rm --user 568:568 \
+  -v /mnt/POOL/pricetracker:/config \
+  ghcr.io/cloudhunter77/pricetracker:latest \
   pricetracker test-url "https://www.example.hu/some-product"
 ```
+
+### Comparison pages need the browser flag
+
+Árukereső and Heureka answer a plain request with a Cloudflare challenge rather
+than the page. The image ships Chromium for exactly this; add `--render
+browser`:
+
+```bash
+sudo docker run --rm --user 568:568 \
+  -v /mnt/POOL/pricetracker:/config \
+  ghcr.io/cloudhunter77/pricetracker:latest \
+  pricetracker test-url --render browser \
+  "https://www.arukereso.hu/fenykepezogep-c3128/sony/alpha-a6700-p1"
+```
+
+The first run takes a few seconds longer while the challenge is solved; the
+clearance cookie is then kept in `data/browser/` and reused. If it comes back
+saying the site is out of reach, that page is not trackable and the per-shop
+sources in `watchlist.yaml` are the fallback — see the README.
 
 ## 4. Install as a TrueNAS app
 
@@ -168,3 +194,7 @@ fetches the current image. Your dataset is untouched.
 | No email, no error | Expected when credentials are unset — the digest is printed to the log instead |
 | `run failed` in the scheduler log | A real error. The log line above it says which stage |
 | A shop reports 403 | That retailer blocks automated clients. Check with `test-url`, and use a shop that works — see the notes in `watchlist.yaml` |
+| `Just a moment…` instead of a price | A JavaScript challenge, not a block. Add `render: browser` to that source |
+| `still on a JavaScript challenge page` | The challenge did not lift for a real browser either. That site is out of reach; use per-shop sources |
+| `Playwright is not installed` | Running outside the container image. `uv sync --extra browser && uv run playwright install chromium` |
+| A browser source is slow | Expected: seconds, not milliseconds. Only sources marked `render: browser` pay it |

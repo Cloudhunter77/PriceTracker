@@ -5,7 +5,13 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from pricetracker.config import ConfigError, Watchlist, append_item, load_watchlist
+from pricetracker.config import (
+    ConfigError,
+    Source,
+    Watchlist,
+    append_item,
+    load_watchlist,
+)
 
 SAMPLE = """
 defaults:
@@ -147,3 +153,26 @@ def test_add_validates_before_writing(tmp_path):
 
 def test_empty_watchlist_is_valid():
     assert Watchlist.model_validate({}).items == []
+
+
+# ---- how a source is fetched and read ----------------------------------
+
+
+def test_a_source_is_a_plain_http_product_page_by_default():
+    source = Source(url="https://shop.example/x")
+    assert source.render == "http"
+    assert source.type == "product"
+    assert source.needs_browser is False
+
+
+def test_browser_rendering_is_opt_in_per_source():
+    source = Source(url="https://www.arukereso.hu/p1", render="browser", type="aggregator")
+    assert source.needs_browser is True
+    assert source.type == "aggregator"
+
+
+@pytest.mark.parametrize("field,value", [("render", "chrome"), ("type", "listing")])
+def test_an_unknown_mode_is_rejected_at_load_time(field, value):
+    """A typo here would otherwise fail silently at 8am, days later."""
+    with pytest.raises(ValidationError, match=field):
+        Source(url="https://shop.example/x", **{field: value})

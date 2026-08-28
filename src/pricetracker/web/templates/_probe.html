@@ -2,7 +2,29 @@
   <div class="job"><strong>{{ error }}</strong></div>
 {% else %}
   <div class="job">
-    {% if winner %}
+    {% if aggregator %}
+      {% if offers %}
+        <strong>{{ offers|length }} shop{{ 's' if offers|length != 1 }} found on this page</strong>
+        &mdash; each becomes its own reading, and the cheapest drives your alert.
+        <table style="margin-top:10px">
+          <thead><tr><th>Shop</th><th class="num">Price</th><th>Stock</th></tr></thead>
+          <tbody>
+            {% for offer in offers %}
+              <tr>
+                <td>{{ offer.seller }}</td>
+                <td class="num">{{ offer.price }} {{ offer.currency or '' }}</td>
+                <td>{% if offer.availability == 'in_stock' %}yes
+                    {%- elif offer.availability %}no
+                    {%- else %}?{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <strong>This page names no shops.</strong>
+        It will still be tracked, but only as the market low shown below.
+      {% endif %}
+    {% elif winner %}
       <strong>Readable via {{ winner }}</strong> — found
       {{ found[winner].price }} {{ found[winner].currency or '' }}.
       {% if winner == 'selector' %}

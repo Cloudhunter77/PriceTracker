@@ -349,3 +349,81 @@ def test_clearing_the_eur_target_stops_tracking_euros(client, tmp_path):
               "enabled": "on", "eur_target": ""},
     )
     assert "EUR" not in (tmp_path / "watchlist.yaml").read_text(encoding="utf-8")
+
+
+# ---- comparison pages in the UI ----------------------------------------
+
+AGGREGATOR_HTML = (
+    Path(__file__).parent / "fixtures" / "aggregator_arukereso.html"
+).read_text(encoding="utf-8")
+
+CHALLENGE_HTML = (
+    "<!doctype html><html><head><title>Just a moment...</title>"
+    "<script src='/cdn-cgi/challenge-platform/x'></script></head><body>"
+    "Checking your browser</body></html>"
+)
+
+
+class CannedFetcher:
+    def __init__(self, html: str):
+        self.html = html
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def fetch(self, url):
+        from pricetracker.fetch import FetchResult
+
+        return FetchResult(url=url, html=self.html, status_code=200)
+
+    def close(self):
+        pass
+
+
+def test_probing_a_comparison_page_lists_the_shops_it_found(client, monkeypatch):
+    monkeypatch.setattr(
+        "pricetracker.web.app.BrowserFetcher", CannedFetcher(AGGREGATOR_HTML)
+    )
+    response = client.post(
+        "/items/test", data={"url": "https://www.arukereso.hu/p1", "kind": "compare"}
+    )
+    assert "3 shops found" in response.text
+    for shop in ("Tripont", "Fotoplus", "eMAG"):
+        assert shop in response.text
+
+
+def test_a_challenge_page_says_to_use_a_browser_rather_than_no_price(client, monkeypatch):
+    """"No price found — try a CSS selector" would send you hunting for a
+    selector on a page that has no prices on it at all."""
+    monkeypatch.setattr("pricetracker.web.app.Fetcher", CannedFetcher(CHALLENGE_HTML))
+    response = client.post(
+        "/items/test", data={"url": "https://www.arukereso.hu/p1", "kind": "shop"}
+    )
+    assert "Just a moment" in response.text
+    assert "browser" in response.text
+
+
+def test_adding_a_comparison_page_writes_both_flags(client, tmp_path):
+    response = client.post(
+        "/items/Sony A7 IV/sources",
+        data={"url": "https://www.arukereso.hu/p1", "kind": "compare"},
+    )
+    assert response.status_code == 303
+    text = (tmp_path / "watchlist.yaml").read_text(encoding="utf-8")
+    assert "render: browser" in text
+    assert "type: aggregator" in text
+    assert "KEEP THIS COMMENT" in text
+
+
+def test_an_ordinary_shop_writes_no_machinery_into_the_file(client, tmp_path):
+    """`render: http` on every line would bury the shops in boilerplate."""
+    client.post("/items/Sony A7 IV/sources", data={"url": "https://emag.hu/a7", "kind": "shop"})
+    text = (tmp_path / "watchlist.yaml").read_text(encoding="utf-8")
+    assert "render:" not in text
+    assert "type:" not in text

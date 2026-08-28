@@ -22,8 +22,10 @@ x-common: &common
   pull_policy: always
   restart: unless-stopped
   # TrueNAS's "apps" user. The dataset must be owned by it, otherwise the
-  # container cannot write price history:
+  # container cannot write price history — or Chromium's profile, which lives
+  # in data/browser and is what stops a challenge being re-solved every day:
   #   sudo chown -R 568:568 /mnt/POOL/pricetracker
+  #   sudo chmod -R u+rwX,g+rwX /mnt/POOL/pricetracker
   user: "${PUID:-568}:${PGID:-568}"
   environment: &env
     # Without this the container runs in UTC and "08:00" is the wrong 08:00.

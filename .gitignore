@@ -1,6 +1,11 @@
 # Pages saved for debugging a failed parse — noisy, and can be large.
 data/debug/
 
+# Chromium's profile: caches, cookies, and a clearance cookie that is ours
+# alone. Hundreds of files, none of them worth a commit.
+data/browser/
+data/browser-probe/
+
 __pycache__/
 *.py[cod]
 .venv/

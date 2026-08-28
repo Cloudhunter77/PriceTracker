@@ -272,3 +272,148 @@ def test_saving_the_state_afterwards_suppresses_the_repeat(store):
     second = run_check(watchlist(), reloaded, fetcher=StubFetcher(pages), now=tomorrow, save_alert_state=False)
 
     assert second.alerts == []
+
+
+# ---- price-comparison pages --------------------------------------------
+
+AGGREGATOR = "https://www.arukereso.hu/fenykepezogep-c3128/sony/alpha-a6700-p1"
+
+
+def aggregator_watchlist(**item_overrides) -> Watchlist:
+    item = {
+        "name": "Sony A6700",
+        "target_price": 550_000,
+        "sources": [{"url": AGGREGATOR, "type": "aggregator", "render": "browser"}],
+    }
+    item.update(item_overrides)
+    return Watchlist.model_validate({"defaults": {"currency": "HUF"}, "items": [item]})
+
+
+def test_a_comparison_page_yields_one_reading_per_shop(store):
+    fetcher = StubFetcher({AGGREGATOR: html("aggregator_arukereso.html")})
+    outcome = run_check(
+        aggregator_watchlist(), store, now=NOW, fetcher=fetcher, browser_fetcher=fetcher
+    )
+
+    by_shop = {r.shop: r for r in outcome.readings}
+    assert set(by_shop) == {"Tripont Foto", "Fotoplus", "eMAG"}
+    assert by_shop["Tripont Foto"].price == Decimal("513120")
+    assert by_shop["eMAG"].in_stock is False
+    assert all(r.method == "aggregator" for r in outcome.readings)
+
+
+def test_each_shop_gets_its_own_url_so_history_stays_separate(store):
+    """Readings are keyed by URL. Sharing one would make every shop's history —
+    and the suspect guard that reads it — a jumble of other shops' prices."""
+    fetcher = StubFetcher({AGGREGATOR: html("aggregator_arukereso.html")})
+    outcome = run_check(
+        aggregator_watchlist(), store, now=NOW, fetcher=fetcher, browser_fetcher=fetcher
+    )
+
+    urls = [r.url for r in outcome.readings]
+    assert len(set(urls)) == len(urls)
+    # A real shop link when the page gives one, the comparison page otherwise.
+    assert "https://www.fotoplus.hu/sony-a6700-vaz" in urls
+    assert f"{AGGREGATOR}#tripont-foto" in urls
+
+
+def test_the_cheapest_shop_on_the_page_drives_the_alert(store):
+    fetcher = StubFetcher({AGGREGATOR: html("aggregator_arukereso.html")})
+    outcome = run_check(
+        aggregator_watchlist(), store, now=NOW, fetcher=fetcher, browser_fetcher=fetcher
+    )
+
+    assert len(outcome.alerts) == 1
+    assert outcome.alerts[0].best.shop == "Tripont Foto"
+    assert outcome.alerts[0].best.price == Decimal("513120")
+
+
+def test_a_page_naming_no_shops_still_gives_the_market_low(store):
+    """Not every comparison page publishes per-seller markup. The 'from' price
+    is less than we wanted but it is honest, and it is what the target needs."""
+    fetcher = StubFetcher({AGGREGATOR: html("aggregator_no_sellers.html")})
+    outcome = run_check(
+        aggregator_watchlist(), store, now=NOW, fetcher=fetcher, browser_fetcher=fetcher
+    )
+
+    assert len(outcome.readings) == 1
+    reading = outcome.readings[0]
+    assert reading.shop == "arukereso.hu"
+    assert reading.price == Decimal("513120")
+    assert reading.method == "json-ld"
+
+
+def test_untracked_currency_is_reported_once_not_once_per_shop(store):
+    """A Slovak page lists a dozen shops in euros. Without a EUR target that is
+    one fact, not a dozen identical errors filling the digest."""
+    fetcher = StubFetcher({AGGREGATOR: html("aggregator_eur.html")})
+    outcome = run_check(
+        aggregator_watchlist(), store, now=NOW, fetcher=fetcher, browser_fetcher=fetcher
+    )
+
+    assert len(outcome.readings) == 1
+    assert outcome.readings[0].status == "error"
+    assert "no target for EUR" in outcome.readings[0].error
+    assert "2 shop(s)" in outcome.readings[0].error
+    assert not outcome.alerts
+
+
+def test_a_eur_target_unlocks_the_euro_shops(store):
+    fetcher = StubFetcher({AGGREGATOR: html("aggregator_eur.html")})
+    outcome = run_check(
+        aggregator_watchlist(targets={"EUR": 1300}),
+        store,
+        now=NOW,
+        fetcher=fetcher,
+        browser_fetcher=fetcher,
+    )
+
+    assert {r.shop for r in outcome.readings} == {"Alza.sk", "Nay"}
+    assert len(outcome.alerts) == 1
+    assert outcome.alerts[0].best.currency == "EUR"
+    assert outcome.alerts[0].best.price == Decimal("1289.00")
+
+
+# ---- choosing an engine -------------------------------------------------
+
+
+def test_chromium_is_never_started_for_ordinary_shops(store):
+    """Launching a browser for a watchlist that does not need one would turn a
+    sub-second run into a slow, memory-hungry one for nothing."""
+    started: list[str] = []
+
+    class ExplodingBrowser:
+        def fetch(self, url):
+            started.append(url)
+            raise AssertionError("the browser should not have been used")
+
+        def close(self):
+            started.append("closed")
+
+    fetcher = StubFetcher({ALZA: html("jsonld_product.html"), EMAG: html("microdata_product.html")})
+    run_check(watchlist(), store, now=NOW, fetcher=fetcher, browser_fetcher=ExplodingBrowser())
+    assert started == []
+
+
+def test_only_the_browser_sources_go_through_the_browser(store):
+    plain = StubFetcher({ALZA: html("jsonld_product.html")})
+    browser = StubFetcher({AGGREGATOR: html("aggregator_arukereso.html")})
+    config = Watchlist.model_validate(
+        {
+            "defaults": {"currency": "HUF"},
+            "items": [
+                {
+                    "name": "Sony A6700",
+                    "target_price": 550_000,
+                    "sources": [
+                        {"url": ALZA},
+                        {"url": AGGREGATOR, "type": "aggregator", "render": "browser"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    run_check(config, store, now=NOW, fetcher=plain, browser_fetcher=browser)
+    assert plain.requested == [ALZA]
+    assert browser.requested == [AGGREGATOR]
